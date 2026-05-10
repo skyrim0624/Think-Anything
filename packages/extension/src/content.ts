@@ -86,14 +86,14 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (isInlineBubbleEvent(event)) return;
-  if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.code === "KeyV") {
+  if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.code === "KeyS") {
     if (event.target instanceof Element && isEditableElement(event.target)) return;
     event.preventDefault();
     event.stopPropagation();
     openInlineBubble({ captureContext: captureReadingContext, showToast });
     return;
   }
-  if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.code === "KeyS") {
+  if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.code === "KeyV") {
     if (event.target instanceof Element && isEditableElement(event.target)) return;
     event.preventDefault();
     event.stopPropagation();

@@ -49,8 +49,8 @@
   "commands": {
     "open_inline": {
       "suggested_key": {
-        "default": "Alt+V",
-        "mac": "Alt+V"
+        "default": "Alt+S",
+        "mac": "Alt+S"
       },
       "description": "在选区旁打开 Think 原位对话框"
     },
@@ -63,8 +63,8 @@
     },
     "quick_capture": {
       "suggested_key": {
-        "default": "Alt+S",
-        "mac": "Alt+S"
+        "default": "Alt+V",
+        "mac": "Alt+V"
       },
       "description": "快速保存当前选区到 Think"
     },
