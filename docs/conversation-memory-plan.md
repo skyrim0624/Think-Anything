@@ -17,14 +17,25 @@ Inline Codex Bubble 需要从“视觉上连续显示问答”升级为“模型
 | 步骤 | 状态 | 目标 | 交付物 |
 | --- | --- | --- | --- |
 | 0 | 已完成 | 建立本阶段计划 | `docs/conversation-memory-plan.md` |
-| 1 | 未开始 | 扩展共享数据结构 | `TwyrConversationMessage`、`AskRequest.conversation`、`CaptureRequest.conversation` |
-| 2 | 未开始 | Bubble 发送历史对话 | 提问时传入前序 user/assistant 消息 |
-| 3 | 未开始 | Bridge prompt 理解历史 | prompt 中加入“本页对话历史”段落 |
-| 4 | 未开始 | 保存完整讨论链路 | 卡片中写入对话摘录，而不只写最后一问一答 |
-| 5 | 未开始 | 构建验证并提交推送 | `npm run check && npm run build` 通过 |
+| 1 | 已完成 | 扩展共享数据结构 | `TwyrConversationMessage`、`AskRequest.conversation`、`CaptureRequest.conversation` |
+| 2 | 已完成 | Bubble 发送历史对话 | 提问时传入前序 user/assistant 消息 |
+| 3 | 已完成 | Bridge prompt 理解历史 | prompt 中加入“本页对话历史”段落 |
+| 4 | 已完成 | 保存完整讨论链路 | 卡片中写入对话摘录，而不只写最后一问一答 |
+| 5 | 已完成 | 构建验证并提交推送 | `npm run check && npm run build` 通过 |
 
 ## 边界
 
 - 只保存同一个 Bubble 生命周期内的对话历史。
 - 暂不做跨页面会话恢复，避免把无关网页的上下文混进来。
 - 历史消息会截断，防止 prompt 过长。
+
+## 提交记录
+
+- `6e5b27a`：建立 Inline Conversation Memory 更新计划。
+- `d9de60e`：实现同页对话历史传递、Bridge prompt 历史理解、卡片完整对话链路写入。
+
+## 验证记录
+
+- `npm run check && npm run build` 已通过。
+- 新增历史消息只包含当前 Bubble 生命周期内的 `user` / `assistant` 消息，不包含系统提示。
+- Bridge prompt 最多携带最近 8 条历史消息，Obsidian 卡片最多写入最近 12 条消息，避免 prompt 和笔记失控膨胀。
