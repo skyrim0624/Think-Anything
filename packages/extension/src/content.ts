@@ -1,4 +1,4 @@
-import type { ReadingContext } from "@twyr/shared";
+import type { ReadingContext, VisualAsset, VisualRect } from "@twyr/shared";
 import { closeInlineBubble, openInlineBubble, quickSaveInlineSelection } from "./inline-bubble.js";
 import type { RuntimeMessage } from "./messages.js";
 
@@ -11,6 +11,7 @@ let selectionTimer: number | undefined;
 let toastTimer: number | undefined;
 let editableGuardTimer: number | undefined;
 let toolbarEnabled = false;
+let lastPointer: { x: number; y: number; time: number } | undefined;
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
   if (message.type === "TWYR_GET_CONTEXT") {
@@ -49,6 +50,7 @@ document.addEventListener("selectionchange", () => {
 document.addEventListener(
   "pointerdown",
   (event) => {
+    rememberPointer(event);
     if (!isToolbarEvent(event)) {
       hideToolbar();
     }
@@ -106,6 +108,7 @@ function captureReadingContext(): ReadingContext {
   const mainElement = findMainElement();
   const pageText = normalizeWhitespace(mainElement.innerText || document.body.innerText || "");
   const pageMarkdown = elementToMarkdown(mainElement);
+  const visualAssets = captureVisualAssets(selection);
   return {
     source: {
       url: location.href,
@@ -127,8 +130,182 @@ function captureReadingContext(): ReadingContext {
       .filter(Boolean)
       .slice(0, 30),
     highlights: [],
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio || 1,
+    },
+    visualAssets,
     capturedAt: new Date().toISOString(),
   };
+}
+
+function rememberPointer(event: PointerEvent): void {
+  lastPointer = {
+    x: event.clientX,
+    y: event.clientY,
+    time: Date.now(),
+  };
+}
+
+function captureVisualAssets(selection: Selection | null): VisualAsset[] {
+  const selectedRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+  const selectionRect = selectedRange ? toVisualRect(selectedRange.getBoundingClientRect()) : undefined;
+  const roots = getVisualSearchRoots(selectedRange);
+  const candidates = new Map<Element, { element: Element; distance: number; reason: string }>();
+
+  if (selectedRange && selectionRect) {
+    for (const root of roots) {
+      for (const element of getMediaElements(root)) {
+        const rect = toVisualRect(element.getBoundingClientRect());
+        if (!isUsableVisualRect(rect)) continue;
+        const distance = rectDistance(selectionRect, rect);
+        const closeEnough = distance <= Math.max(900, window.innerHeight * 0.9);
+        if (!closeEnough) continue;
+        const current = candidates.get(element);
+        if (!current || distance < current.distance) {
+          candidates.set(element, { element, distance, reason: "selection-nearby" });
+        }
+      }
+    }
+  }
+
+  const pointedElement = getPointedMediaElement();
+  if (pointedElement) {
+    candidates.set(pointedElement, { element: pointedElement, distance: -1, reason: "last-pointer" });
+  }
+
+  return Array.from(candidates.values())
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 4)
+    .map(({ element, reason }, index) => buildVisualAsset(element, index, reason))
+    .filter((asset): asset is VisualAsset => Boolean(asset));
+}
+
+function getVisualSearchRoots(range: Range | null): Element[] {
+  const roots: Element[] = [];
+  const commonElement = getRangeElement(range);
+  const semanticRoot = commonElement?.closest(
+    'article, [role="article"], [data-testid="tweet"], [data-testid="cellInnerDiv"], main, section',
+  );
+  if (semanticRoot) roots.push(semanticRoot);
+  if (commonElement) roots.push(commonElement);
+  roots.push(findMainElement());
+  return Array.from(new Set(roots));
+}
+
+function getRangeElement(range: Range | null): Element | null {
+  if (!range) return null;
+  const node = range.commonAncestorContainer;
+  return node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+}
+
+function getMediaElements(root: Element): Element[] {
+  const selector = [
+    "img",
+    "picture",
+    "video",
+    "canvas",
+    '[role="img"]',
+    '[data-testid="videoPlayer"]',
+    '[data-testid="videoComponent"]',
+    '[data-testid="previewInterstitial"]',
+  ].join(",");
+  return Array.from(root.querySelectorAll(selector)).filter((element) => {
+    if (element.closest(`#${INLINE_BUBBLE_HOST_ID}, #${TOOLBAR_ID}`)) return false;
+    return isVisibleElement(element);
+  });
+}
+
+function getPointedMediaElement(): Element | null {
+  if (!lastPointer || Date.now() - lastPointer.time > 8000) return null;
+  const element = document.elementFromPoint(lastPointer.x, lastPointer.y);
+  if (!element) return null;
+  const media = element.closest(
+    'img, picture, video, canvas, [role="img"], [data-testid="videoPlayer"], [data-testid="videoComponent"]',
+  );
+  if (!media || !isVisibleElement(media)) return null;
+  return media;
+}
+
+function buildVisualAsset(element: Element, index: number, reason: string): VisualAsset | null {
+  const rect = toVisualRect(element.getBoundingClientRect());
+  if (!isUsableVisualRect(rect)) return null;
+  const type = inferVisualType(element);
+  return {
+    id: `${type}-${index + 1}`,
+    type,
+    label: buildVisualLabel(type, index, reason),
+    rect,
+    sourceUrl: getVisualSourceUrl(element),
+    alt: getVisualAltText(element),
+    capturedAt: new Date().toISOString(),
+  };
+}
+
+function inferVisualType(element: Element): VisualAsset["type"] {
+  const tag = element.tagName.toLowerCase();
+  const testId = element.getAttribute("data-testid")?.toLowerCase() || "";
+  if (tag === "video" || testId.includes("video")) return "video";
+  if (tag === "canvas") return "canvas";
+  return "image";
+}
+
+function buildVisualLabel(type: VisualAsset["type"], index: number, reason: string): string {
+  const name = type === "video" ? "视频画面" : type === "canvas" ? "画布画面" : "图片画面";
+  const source = reason === "last-pointer" ? "用户刚刚指向" : "选区附近";
+  return `${source}${name} ${index + 1}`;
+}
+
+function getVisualSourceUrl(element: Element): string | undefined {
+  if (element instanceof HTMLImageElement) return element.currentSrc || element.src || undefined;
+  if (element instanceof HTMLVideoElement) return element.currentSrc || element.src || element.poster || undefined;
+  const nestedImage = element.querySelector("img");
+  if (nestedImage) return nestedImage.currentSrc || nestedImage.src || undefined;
+  const background = getComputedStyle(element).backgroundImage;
+  const match = background.match(/url\(["']?(.+?)["']?\)/);
+  if (!match?.[1]) return undefined;
+  try {
+    return new URL(match[1], location.href).href;
+  } catch {
+    return match[1];
+  }
+}
+
+function getVisualAltText(element: Element): string | undefined {
+  if (element instanceof HTMLImageElement) return element.alt || undefined;
+  const aria = element.getAttribute("aria-label") || element.getAttribute("title") || "";
+  const nestedImage = element.querySelector("img");
+  return aria || nestedImage?.alt || undefined;
+}
+
+function isVisibleElement(element: Element): boolean {
+  const rect = element.getBoundingClientRect();
+  if (!isUsableVisualRect(toVisualRect(rect))) return false;
+  const style = getComputedStyle(element);
+  return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity || "1") > 0.05;
+}
+
+function toVisualRect(rect: DOMRect): VisualRect {
+  return {
+    x: rect.left,
+    y: rect.top,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+function isUsableVisualRect(rect: VisualRect): boolean {
+  if (rect.width < 24 || rect.height < 24) return false;
+  if (rect.x >= window.innerWidth || rect.y >= window.innerHeight) return false;
+  if (rect.x + rect.width <= 0 || rect.y + rect.height <= 0) return false;
+  return true;
+}
+
+function rectDistance(a: VisualRect, b: VisualRect): number {
+  const dx = Math.max(a.x - (b.x + b.width), b.x - (a.x + a.width), 0);
+  const dy = Math.max(a.y - (b.y + b.height), b.y - (a.y + a.height), 0);
+  return Math.hypot(dx, dy);
 }
 
 function updateToolbar(): void {

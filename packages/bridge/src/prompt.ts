@@ -40,6 +40,7 @@ export function buildAskPrompt(params: {
     "- 不确定时明确说“这是推测”。",
     "- 简单术语解释要短；观点判断、项目关联、写作素材要展开。",
     "- 如果用户问题是追问，先参考本页对话历史，但不要把上一轮回答当成网页事实来源。",
+    "- 如果当前上下文包含视觉附件，Codex 已收到对应截图；回答时要明确哪些判断来自画面，哪些只是根据页面文字推测。",
     "- 全文入库只能建议，不能当成已经保存。",
     "",
     "保存分级：",
@@ -72,6 +73,15 @@ export function buildAskPrompt(params: {
     JSON.stringify(
       {
         ...params.context,
+        visualAssets: params.context.visualAssets?.map((asset) => ({
+          id: asset.id,
+          type: asset.type,
+          label: asset.label,
+          sourceUrl: asset.sourceUrl,
+          alt: asset.alt,
+          vaultPath: asset.vaultPath,
+          capturedAt: asset.capturedAt,
+        })),
         pageText: trimText(params.context.pageText, 5000),
         pageMarkdown: trimText(params.context.pageMarkdown, 9000),
       },

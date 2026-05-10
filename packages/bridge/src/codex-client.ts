@@ -8,6 +8,10 @@ export interface CodexRunOutput {
   runtime: "sdk" | "cli";
 }
 
+export interface CodexVisualInput {
+  path: string;
+}
+
 export class CodexAuthError extends Error {
   constructor(message: string) {
     super(message);
@@ -27,7 +31,11 @@ export async function isCodexSdkAvailable(): Promise<boolean> {
   }
 }
 
-export async function runCodexPrompt(prompt: string, config: BridgeConfig): Promise<CodexRunOutput> {
+export async function runCodexPrompt(
+  prompt: string,
+  config: BridgeConfig,
+  visualInputs: CodexVisualInput[] = [],
+): Promise<CodexRunOutput> {
   try {
     const codex = new Codex({
       codexPathOverride: config.codexCommand,
@@ -39,7 +47,13 @@ export async function runCodexPrompt(prompt: string, config: BridgeConfig): Prom
       skipGitRepoCheck: true,
       webSearchMode: "disabled",
     });
-    const result = await thread.run(prompt);
+    const input = visualInputs.length
+      ? [
+          { type: "text" as const, text: prompt },
+          ...visualInputs.map((visual) => ({ type: "local_image" as const, path: visual.path })),
+        ]
+      : prompt;
+    const result = await thread.run(input);
     return {
       runtime: "sdk",
       text: normalizeCodexResult(result),
@@ -53,7 +67,7 @@ export async function runCodexPrompt(prompt: string, config: BridgeConfig): Prom
     }
     return {
       runtime: "cli",
-      text: await runCodexCli(prompt, config),
+      text: await runCodexCli(prompt, config, visualInputs),
     };
   }
 }
@@ -69,13 +83,15 @@ function normalizeCodexResult(result: unknown): string {
   return JSON.stringify(result, null, 2);
 }
 
-function runCodexCli(prompt: string, config: BridgeConfig): Promise<string> {
+function runCodexCli(prompt: string, config: BridgeConfig, visualInputs: CodexVisualInput[]): Promise<string> {
   return new Promise((resolve, reject) => {
+    const imageArgs = visualInputs.flatMap((visual) => ["--image", visual.path]);
     const child = spawn(
       config.codexCommand,
       [
         "exec",
         "--json",
+        ...imageArgs,
         "--cd",
         config.vaultPath,
         "--sandbox",

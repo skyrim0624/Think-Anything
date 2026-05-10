@@ -1,3 +1,4 @@
+import type { ReadingContext, VisualAsset, VisualRect, VisualViewport } from "@twyr/shared";
 import type { PendingAction, RuntimeMessage } from "./messages.js";
 import { askTwyr, captureTwyr, loadSettings, promoteSource, retrieveTwyr } from "./api.js";
 import { PENDING_ACTION_KEY } from "./messages.js";
@@ -6,6 +7,7 @@ const MENU_IDS = {
   enableToolbar: "twyr-enable-toolbar",
   disableToolbar: "twyr-disable-toolbar",
   explain: "twyr-explain-selection",
+  visual: "twyr-explain-visual",
   challenge: "twyr-challenge-selection",
   connect: "twyr-connect-notes",
   capture: "twyr-capture-selection",
@@ -14,6 +16,9 @@ const MENU_IDS = {
 
 let standaloneWindowId: number | undefined;
 let standaloneOpenPromise: Promise<void> | undefined;
+const MAX_VISUAL_ASSETS = 3;
+const VISUAL_PADDING = 18;
+const MAX_VISUAL_DIMENSION = 1280;
 
 chrome.runtime.onInstalled.addListener(() => {
   void setupContextMenus();
@@ -75,12 +80,30 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
+  if (message.type === "TWYR_CAPTURE_VISUALS") {
+    void handleInlineApi(() => captureVisualContext(message.context, message.sourceTabId ?? sender.tab?.id), sendResponse);
+    return true;
+  }
   if (message.type === "TWYR_INLINE_ASK") {
-    void handleInlineApi(() => askTwyrFromStorage(message.body), sendResponse);
+    void handleInlineApi(
+      async () =>
+        askTwyrFromStorage({
+          ...message.body,
+          context: await captureVisualContext(message.body.context, sender.tab?.id),
+        }),
+      sendResponse,
+    );
     return true;
   }
   if (message.type === "TWYR_INLINE_CAPTURE") {
-    void handleInlineApi(() => captureTwyrFromStorage(message.body), sendResponse);
+    void handleInlineApi(
+      async () =>
+        captureTwyrFromStorage({
+          ...message.body,
+          context: await captureVisualContext(message.body.context, sender.tab?.id),
+        }),
+      sendResponse,
+    );
     return true;
   }
   if (message.type === "TWYR_INLINE_RETRIEVE") {
@@ -88,7 +111,14 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     return true;
   }
   if (message.type === "TWYR_INLINE_PROMOTE_SOURCE") {
-    void handleInlineApi(() => promoteSourceFromStorage(message.body), sendResponse);
+    void handleInlineApi(
+      async () =>
+        promoteSourceFromStorage({
+          ...message.body,
+          context: await captureVisualContext(message.body.context, sender.tab?.id),
+        }),
+      sendResponse,
+    );
     return true;
   }
   if (message.type !== "TWYR_OPEN_PANEL" && message.type !== "TWYR_SELECTION_CAPTURED") return false;
@@ -120,6 +150,82 @@ async function promoteSourceFromStorage(body: Parameters<typeof promoteSource>[1
   return promoteSource(await loadSettings(), body);
 }
 
+async function captureVisualContext(context: ReadingContext, sourceTabId?: number): Promise<ReadingContext> {
+  const candidates = (context.visualAssets ?? []).filter((asset) => asset.rect && !asset.dataUrl).slice(0, MAX_VISUAL_ASSETS);
+  if (!candidates.length) return context;
+
+  try {
+    const windowId = sourceTabId ? (await chrome.tabs.get(sourceTabId)).windowId : undefined;
+    const screenshot =
+      typeof windowId === "number"
+        ? await chrome.tabs.captureVisibleTab(windowId, { format: "png" })
+        : await chrome.tabs.captureVisibleTab({ format: "png" });
+    const image = await loadImageBitmap(screenshot);
+    const viewport = context.viewport ?? inferViewportFromBitmap(image);
+    const visualAssets = await Promise.all(
+      (context.visualAssets ?? []).map(async (asset) => {
+        if (!asset.rect || asset.dataUrl || !candidates.some((candidate) => candidate.id === asset.id)) return asset;
+        return {
+          ...asset,
+          dataUrl: await cropVisualAsset(image, viewport, asset.rect),
+          mimeType: "image/jpeg",
+          capturedAt: new Date().toISOString(),
+        };
+      }),
+    );
+    image.close();
+    return { ...context, visualAssets };
+  } catch {
+    return context;
+  }
+}
+
+async function loadImageBitmap(dataUrl: string): Promise<ImageBitmap> {
+  const blob = await (await fetch(dataUrl)).blob();
+  return createImageBitmap(blob);
+}
+
+function inferViewportFromBitmap(image: ImageBitmap): VisualViewport {
+  return {
+    width: image.width,
+    height: image.height,
+    devicePixelRatio: 1,
+  };
+}
+
+async function cropVisualAsset(image: ImageBitmap, viewport: VisualViewport, rect: VisualRect): Promise<string> {
+  const scaleX = image.width / Math.max(1, viewport.width);
+  const scaleY = image.height / Math.max(1, viewport.height);
+  const left = clamp(rect.x - VISUAL_PADDING, 0, viewport.width);
+  const top = clamp(rect.y - VISUAL_PADDING, 0, viewport.height);
+  const right = clamp(rect.x + rect.width + VISUAL_PADDING, 0, viewport.width);
+  const bottom = clamp(rect.y + rect.height + VISUAL_PADDING, 0, viewport.height);
+
+  const sx = Math.round(left * scaleX);
+  const sy = Math.round(top * scaleY);
+  const sw = Math.max(1, Math.round((right - left) * scaleX));
+  const sh = Math.max(1, Math.round((bottom - top) * scaleY));
+  const outputScale = Math.min(1, MAX_VISUAL_DIMENSION / Math.max(sw, sh));
+  const width = Math.max(1, Math.round(sw * outputScale));
+  const height = Math.max(1, Math.round(sh * outputScale));
+  const canvas = new OffscreenCanvas(width, height);
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("无法创建截图裁剪画布。");
+  context.drawImage(image, sx, sy, sw, sh, 0, 0, width, height);
+  const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.86 });
+  return blobToDataUrl(blob);
+}
+
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  const buffer = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < buffer.length; index += chunkSize) {
+    binary += String.fromCharCode(...buffer.slice(index, index + chunkSize));
+  }
+  return `data:${blob.type || "image/jpeg"};base64,${btoa(binary)}`;
+}
+
 async function handleInlineApi<T>(
   handler: () => Promise<T>,
   sendResponse: (response?: unknown) => void,
@@ -147,6 +253,11 @@ async function setupContextMenus(): Promise<void> {
     id: MENU_IDS.explain,
     title: "Think：解释选中内容",
     contexts: ["selection"],
+  });
+  await chrome.contextMenus.create({
+    id: MENU_IDS.visual,
+    title: "Think：查看这张图片/视频",
+    contexts: ["image", "video"],
   });
   await chrome.contextMenus.create({
     id: MENU_IDS.challenge,
@@ -241,6 +352,8 @@ function actionFromMenu(menuItemId: string | number): PendingAction | null {
   switch (menuItemId) {
     case MENU_IDS.explain:
       return { kind: "ask", mode: "explain", createdAt };
+    case MENU_IDS.visual:
+      return { kind: "ask", mode: "explain", question: "请查看我选中的图片或视频画面，并结合页面上下文解释。", createdAt };
     case MENU_IDS.challenge:
       return { kind: "ask", mode: "challenge", createdAt };
     case MENU_IDS.connect:
@@ -337,4 +450,8 @@ async function findStandaloneWindowId(): Promise<number | undefined> {
 
 function isStandalonePanelUrl(url: string | undefined): boolean {
   return Boolean(url?.startsWith(chrome.runtime.getURL("side-panel.html")));
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), Math.max(min, max));
 }

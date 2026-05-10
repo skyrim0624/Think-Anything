@@ -17,6 +17,8 @@ type Message =
   | { role: "user"; content: string }
   | { role: "assistant"; content: string; response?: AskResponse };
 
+type RuntimeResult<T> = { ok: true; data: T } | { ok: false; error: string };
+
 function App(): React.ReactElement {
   const [settings, setSettings] = useState<ExtensionSettings>({ bridgeUrl: "", token: "" });
   const [status, setStatus] = useState<ApiStatus | null>(null);
@@ -31,7 +33,8 @@ function App(): React.ReactElement {
   const contextSummary = useMemo(() => {
     if (!context) return "当前页面不可读取";
     const selection = context.selectionText ? `已选中 ${context.selectionText.length} 字` : "未选中文本";
-    return `${context.source.site || "网页"} · ${selection}`;
+    const visual = context.visualAssets?.length ? ` · ${context.visualAssets.length} 个画面` : "";
+    return `${context.source.site || "网页"} · ${selection}${visual}`;
   }, [context]);
 
   const refreshContext = useCallback(async (sourceTabId?: number) => {
@@ -105,8 +108,9 @@ function App(): React.ReactElement {
     setIsBusy(true);
     setMessages((current) => [...current, { role: "user", content: effectiveQuestion }]);
     try {
+      const visualContext = await captureVisualContext(context, sourceTabIdRef.current);
       const response = await askTwyr(settings, {
-        context,
+        context: visualContext,
         question: effectiveQuestion,
         mode,
         forceRetrieval,
@@ -128,8 +132,9 @@ function App(): React.ReactElement {
     const note = getUserWrittenNote(question, autoQuestionRef.current);
     setIsBusy(true);
     try {
+      const visualContext = await captureVisualContext(context, sourceTabIdRef.current);
       const response = await captureTwyr(settings, {
-        context,
+        context: visualContext,
         cardType: context.selectionText ? "quote" : "insight",
         level: "card",
         note,
@@ -182,8 +187,9 @@ function App(): React.ReactElement {
     if (!confirmed) return;
     setIsBusy(true);
     try {
+      const visualContext = await captureVisualContext(context, sourceTabIdRef.current);
       const response = await promoteSource(settings, {
-        context,
+        context: visualContext,
         confirmed: true,
         reason: question || "用户确认这篇文章值得全文入库。",
       });
@@ -326,6 +332,20 @@ function App(): React.ReactElement {
 async function getCurrentWindowTabId(): Promise<number | undefined> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab?.id;
+}
+
+async function captureVisualContext(context: ReadingContext, sourceTabId: number | undefined): Promise<ReadingContext> {
+  if (!context.visualAssets?.length) return context;
+  try {
+    const response = (await chrome.runtime.sendMessage({
+      type: "TWYR_CAPTURE_VISUALS",
+      context,
+      sourceTabId,
+    })) as RuntimeResult<ReadingContext>;
+    return response?.ok ? response.data : context;
+  } catch {
+    return context;
+  }
 }
 
 function MessageView({ message }: { message: Message }): React.ReactElement {

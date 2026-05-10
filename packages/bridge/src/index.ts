@@ -4,6 +4,7 @@ import { isCodexAuthError, isCodexCliAvailable, isCodexSdkAvailable, runCodexPro
 import { buildAskPrompt, parseModelAnswer } from "./prompt.js";
 import { RetrievalService } from "./retrieval.js";
 import { VaultService } from "./vault.js";
+import { prepareVisualContext } from "./visual-assets.js";
 import type {
   AskRequest,
   AskResponse,
@@ -44,7 +45,8 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "POST" && url.pathname === "/api/capture") {
       const body = await readJson<CaptureRequest>(request);
-      const result = vault.writeCard(body);
+      const prepared = prepareVisualContext(body.context, config);
+      const result = vault.writeCard({ ...body, context: prepared.context });
       retrieval.refreshIndex(true);
       sendJson(response, 200, result);
       return;
@@ -62,7 +64,8 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "POST" && url.pathname === "/api/promote-source") {
       const body = await readJson<PromoteSourceRequest>(request);
-      const result = vault.promoteSource(body);
+      const prepared = prepareVisualContext(body.context, config);
+      const result = vault.promoteSource({ ...body, context: prepared.context });
       retrieval.refreshIndex(true);
       sendJson(response, 200, result);
       return;
@@ -99,15 +102,16 @@ async function handleStatus(request: IncomingMessage, response: ServerResponse):
 
 async function handleAsk(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const body = await readJson<AskRequest>(request);
+  const prepared = prepareVisualContext(body.context, config);
   const mode = body.mode ?? "freeform";
   const decision = retrieval.decideAndSearch({
-    context: body.context,
+    context: prepared.context,
     query: body.question,
     mode,
     force: body.forceRetrieval,
   });
   const prompt = buildAskPrompt({
-    context: body.context,
+    context: prepared.context,
     question: body.question,
     mode,
     retrieval: decision,
@@ -115,7 +119,7 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
   });
   let output: Awaited<ReturnType<typeof runCodexPrompt>>;
   try {
-    output = await runCodexPrompt(prompt, config);
+    output = await runCodexPrompt(prompt, config, prepared.assets);
   } catch (error) {
     if (isCodexAuthError(error)) {
       sendJson(response, 503, {
@@ -129,7 +133,7 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
   }
   const parsed = parseModelAnswer(output.text);
   const threadPath = vault.appendThread({
-    context: body.context,
+    context: prepared.context,
     question: body.question,
     answer: parsed.answer,
     retrieval: decision,
@@ -171,7 +175,7 @@ function readJson<T>(request: IncomingMessage): Promise<T> {
     let raw = "";
     request.on("data", (chunk: Buffer) => {
       raw += chunk.toString("utf8");
-      if (raw.length > 5_000_000) {
+      if (raw.length > 15_000_000) {
         reject(new Error("请求体过大"));
         request.destroy();
       }

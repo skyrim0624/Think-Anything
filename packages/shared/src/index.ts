@@ -35,6 +35,34 @@ export interface SourceMetadata {
   language?: string;
 }
 
+export interface VisualRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface VisualViewport {
+  width: number;
+  height: number;
+  devicePixelRatio: number;
+}
+
+export type VisualAssetType = "selection" | "image" | "video" | "canvas" | "screenshot";
+
+export interface VisualAsset {
+  id: string;
+  type: VisualAssetType;
+  label: string;
+  rect?: VisualRect;
+  sourceUrl?: string;
+  alt?: string;
+  mimeType?: string;
+  dataUrl?: string;
+  vaultPath?: string;
+  capturedAt?: string;
+}
+
 export interface ReadingContext {
   source: SourceMetadata;
   selectionText?: string;
@@ -44,6 +72,8 @@ export interface ReadingContext {
   pageMarkdown?: string;
   headings?: string[];
   highlights?: string[];
+  viewport?: VisualViewport;
+  visualAssets?: VisualAsset[];
   capturedAt: string;
 }
 

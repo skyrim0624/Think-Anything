@@ -42,9 +42,7 @@ let isBusy = false;
 
 export function openInlineBubble(options: InlineBubbleOptions): void {
   currentContext = options.captureContext();
-  messages = currentContext.selectionText
-    ? [{ role: "system", content: "已捕获当前选区，可以直接提问。" }]
-    : [{ role: "system", content: "未检测到选区，将使用当前页面作为上下文。" }];
+  messages = [{ role: "system", content: buildInitialCaptureMessage(currentContext) }];
   lastQuestion = "";
   lastAnswer = "";
   lastThreadPath = "";
@@ -59,8 +57,8 @@ export function openInlineBubble(options: InlineBubbleOptions): void {
 
 export async function quickSaveInlineSelection(options: InlineBubbleOptions): Promise<void> {
   const context = options.captureContext();
-  if (!context.selectionText) {
-    options.showToast("Think：请先选中文本再快速保存");
+  if (!context.selectionText && !context.visualAssets?.length) {
+    options.showToast("Think：请先选中文本或指向图片/视频再快速保存");
     return;
   }
   try {
@@ -68,9 +66,11 @@ export async function quickSaveInlineSelection(options: InlineBubbleOptions): Pr
       type: "TWYR_INLINE_CAPTURE",
       body: {
         context,
-        cardType: "quote",
+        cardType: context.selectionText ? "quote" : "insight",
         level: "card",
-        reason: "用户通过 Option+S 在阅读现场快速保存选区。",
+        reason: context.selectionText
+          ? "用户通过 Option+S 在阅读现场快速保存选区。"
+          : "用户通过 Option+S 在阅读现场快速保存视觉材料。",
       },
     });
     options.showToast("Think：选区已保存");
@@ -144,7 +144,8 @@ function renderBubble(options: InlineBubbleOptions): void {
     const selectionLabel = currentContext.selectionText
       ? `已选中 ${currentContext.selectionText.length} 字`
       : "未选中文本";
-    context.textContent = `${currentContext.source.site || location.hostname} · ${selectionLabel}`;
+    const visualLabel = currentContext.visualAssets?.length ? ` · ${currentContext.visualAssets.length} 个画面` : "";
+    context.textContent = `${currentContext.source.site || location.hostname} · ${selectionLabel}${visualLabel}`;
   }
   if (messageList) {
     messageList.innerHTML = messages
@@ -235,7 +236,9 @@ async function saveCurrentThread(options: InlineBubbleOptions): Promise<void> {
 function buildCapturePlan(context: ReadingContext): { level: CaptureLevel; cardType: TwyrCardType; reason: string } {
   const fallbackCardType: TwyrCardType = context.selectionText ? "quote" : "insight";
   const fallbackReason = lastQuestion
-    ? "用户在 Inline Codex 对话中保存了选区、问题和回答。"
+    ? context.visualAssets?.length
+      ? "用户在 Inline Codex 对话中保存了视觉材料、问题和回答。"
+      : "用户在 Inline Codex 对话中保存了选区、问题和回答。"
     : "用户在 Inline Codex 对话中保存了当前阅读上下文。";
   if (!lastSaveRecommendation) {
     return {
@@ -252,6 +255,14 @@ function buildCapturePlan(context: ReadingContext): { level: CaptureLevel; cardT
     cardType: lastSaveRecommendation.cardType,
     reason: [fallbackReason, `AI 保存建议：${lastSaveRecommendation.reason}`, sourceCaveat].filter(Boolean).join("\n\n"),
   };
+}
+
+function buildInitialCaptureMessage(context: ReadingContext): string {
+  const parts: string[] = [];
+  if (context.selectionText) parts.push("当前选区");
+  if (context.visualAssets?.length) parts.push(`${context.visualAssets.length} 个图片/视频画面`);
+  if (!parts.length) return "未检测到选区，将使用当前页面作为上下文。";
+  return `已捕获${parts.join(" + ")}，可以直接提问。`;
 }
 
 function buildSaveButtonTitle(): string {

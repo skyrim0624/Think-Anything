@@ -16,6 +16,7 @@ import { blockquote, localDateTime, shortHash, slugify, todayPathDate, trimText,
 
 const DIRECTORIES = [
   "00-INBOX",
+  "00-INBOX/assets",
   "10-SOURCES",
   "20-CARDS",
   "30-THREADS",
@@ -67,6 +68,9 @@ export class VaultService {
       `**问题**：${params.question}`,
       "",
       params.context.selectionText ? ["**选区**", "", blockquote(params.context.selectionText), ""].join("\n") : "",
+      params.context.visualAssets?.length
+        ? ["**视觉附件**", "", formatVisualAssets(params.context.visualAssets), ""].join("\n")
+        : "",
       "**TWYR 回答**",
       "",
       params.answer,
@@ -201,6 +205,9 @@ function buildCardMarkdown(request: CaptureRequest, level: CaptureLevel, cardTyp
     "",
     request.threadPath ? ["## 讨论线程", "", buildObsidianLink(request.threadPath, "打开完整阅读讨论"), ""].join("\n") : "",
     request.context.selectionText ? ["## 原文选区", "", blockquote(request.context.selectionText), ""].join("\n") : "",
+    request.context.visualAssets?.length
+      ? ["## 视觉附件", "", formatVisualAssets(request.context.visualAssets), ""].join("\n")
+      : "",
     request.question ? ["## 问题", "", request.question, ""].join("\n") : "",
     request.answer ? ["## TWYR 回答", "", request.answer, ""].join("\n") : "",
     request.conversation && request.conversation.length > 2
@@ -216,6 +223,21 @@ function buildCardMarkdown(request: CaptureRequest, level: CaptureLevel, cardTyp
 
 function buildObsidianLink(path: string, label: string): string {
   return `[[${path.replace(/\.md$/, "")}|${label}]]`;
+}
+
+function formatVisualAssets(assets: ReadingContext["visualAssets"]): string {
+  return (assets ?? [])
+    .map((asset, index) => {
+      const title = `${index + 1}. ${asset.label || asset.type}`;
+      const imageLink = asset.vaultPath ? `![[${asset.vaultPath}]]` : "";
+      const details = [
+        `- 类型：${asset.type}`,
+        asset.sourceUrl ? `- 来源：${asset.sourceUrl}` : "",
+        asset.alt ? `- 描述：${asset.alt}` : "",
+      ].filter(Boolean);
+      return [title, imageLink, ...details].filter(Boolean).join("\n");
+    })
+    .join("\n\n");
 }
 
 function formatConversation(conversation: CaptureRequest["conversation"]): string {
@@ -259,6 +281,9 @@ function buildSourceMarkdown(request: PromoteSourceRequest): string {
     "## 与我产生连接的点",
     "",
     request.context.selectionText ? blockquote(request.context.selectionText) : "待从后续讨论中提炼。",
+    request.context.visualAssets?.length
+      ? ["", "## 视觉附件", "", formatVisualAssets(request.context.visualAssets), ""].join("\n")
+      : "",
     "",
     "## 原文",
     "",
