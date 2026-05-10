@@ -1,4 +1,5 @@
 import type { ReadingContext } from "@twyr/shared";
+import { closeInlineBubble, openInlineBubble, quickSaveInlineSelection } from "./inline-bubble.js";
 import type { RuntimeMessage } from "./messages.js";
 
 const TOOLBAR_ID = "twyr-selection-toolbar";
@@ -23,6 +24,17 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
   if (message.type === "TWYR_TOGGLE_TOOLBAR") {
     setToolbarEnabled(!toolbarEnabled);
     sendResponse({ enabled: toolbarEnabled });
+    return true;
+  }
+  if (message.type === "TWYR_OPEN_INLINE") {
+    openInlineBubble({ captureContext: captureReadingContext, showToast });
+    sendResponse({ ok: true });
+    return true;
+  }
+  if (message.type === "TWYR_INLINE_QUICK_SAVE") {
+    void quickSaveInlineSelection({ captureContext: captureReadingContext, showToast }).then(() => {
+      sendResponse({ ok: true });
+    });
     return true;
   }
   return false;
@@ -64,6 +76,12 @@ document.addEventListener(
 );
 
 document.addEventListener("scroll", () => hideToolbar(), { passive: true });
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeInlineBubble();
+  }
+});
 
 function captureReadingContext(): ReadingContext {
   const selection = window.getSelection();

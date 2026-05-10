@@ -34,6 +34,13 @@
     "default_title": "TWYR"
   },
   "commands": {
+    "open_inline": {
+      "suggested_key": {
+        "default": "Alt+V",
+        "mac": "Alt+V"
+      },
+      "description": "在选区旁打开 TWYR 原位对话框"
+    },
     "open_twyr": {
       "suggested_key": {
         "default": "Ctrl+Shift+K",
@@ -43,16 +50,12 @@
     },
     "quick_capture": {
       "suggested_key": {
-        "default": "Alt+Shift+T",
-        "mac": "Alt+Shift+T"
+        "default": "Alt+S",
+        "mac": "Alt+S"
       },
-      "description": "快速保存当前选区"
+      "description": "快速保存当前选区到 TWYR"
     },
     "toggle_toolbar": {
-      "suggested_key": {
-        "default": "Alt+Shift+Y",
-        "mac": "Alt+Shift+Y"
-      },
       "description": "开启或关闭本页 TWYR 选区工具条"
     }
   }

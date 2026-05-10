@@ -1,4 +1,5 @@
 import type { PendingAction, RuntimeMessage } from "./messages.js";
+import { askTwyr, captureTwyr, loadSettings, retrieveTwyr } from "./api.js";
 import { PENDING_ACTION_KEY } from "./messages.js";
 
 const MENU_IDS = {
@@ -43,8 +44,11 @@ chrome.commands.onCommand.addListener((command) => {
     if (command === "open_twyr") {
       await openStandalonePanel(tab.id, { kind: "ask", mode: "explain", createdAt: Date.now() });
     }
+    if (command === "open_inline") {
+      await sendContentCommand(tab.id, { type: "TWYR_OPEN_INLINE" });
+    }
     if (command === "quick_capture") {
-      await openStandalonePanel(tab.id, { kind: "capture", mode: "capture", createdAt: Date.now() });
+      await sendContentCommand(tab.id, { type: "TWYR_INLINE_QUICK_SAVE" });
     }
     if (command === "toggle_toolbar") {
       await toggleToolbar(tab.id);
@@ -71,6 +75,18 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
+  if (message.type === "TWYR_INLINE_ASK") {
+    void handleInlineApi(() => askTwyrFromStorage(message.body), sendResponse);
+    return true;
+  }
+  if (message.type === "TWYR_INLINE_CAPTURE") {
+    void handleInlineApi(() => captureTwyrFromStorage(message.body), sendResponse);
+    return true;
+  }
+  if (message.type === "TWYR_INLINE_RETRIEVE") {
+    void handleInlineApi(() => retrieveTwyrFromStorage(message.body), sendResponse);
+    return true;
+  }
   if (message.type !== "TWYR_OPEN_PANEL" && message.type !== "TWYR_SELECTION_CAPTURED") return false;
   const tabId = sender.tab?.id;
   if (!tabId) return false;
@@ -83,6 +99,29 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     .catch((error) => sendResponse({ ok: false, error: String(error) }));
   return true;
 });
+
+async function askTwyrFromStorage(body: Parameters<typeof askTwyr>[1]): ReturnType<typeof askTwyr> {
+  return askTwyr(await loadSettings(), body);
+}
+
+async function captureTwyrFromStorage(body: Parameters<typeof captureTwyr>[1]): ReturnType<typeof captureTwyr> {
+  return captureTwyr(await loadSettings(), body);
+}
+
+async function retrieveTwyrFromStorage(body: Parameters<typeof retrieveTwyr>[1]): ReturnType<typeof retrieveTwyr> {
+  return retrieveTwyr(await loadSettings(), body);
+}
+
+async function handleInlineApi<T>(
+  handler: () => Promise<T>,
+  sendResponse: (response?: unknown) => void,
+): Promise<void> {
+  try {
+    sendResponse({ ok: true, data: await handler() });
+  } catch (error) {
+    sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+  }
+}
 
 async function setupContextMenus(): Promise<void> {
   await chrome.contextMenus.removeAll();
@@ -172,6 +211,16 @@ async function toggleToolbar(tabId: number): Promise<void> {
     await chrome.tabs.sendMessage(tabId, { type: "TWYR_TOGGLE_TOOLBAR" });
   } catch {
     // 同上，避免快捷键在不可注入页面制造后台错误。
+  }
+}
+
+async function sendContentCommand(tabId: number, message: RuntimeMessage): Promise<void> {
+  const ready = await ensureContentScript(tabId);
+  if (!ready) return;
+  try {
+    await chrome.tabs.sendMessage(tabId, message);
+  } catch {
+    // 页面刚跳转或禁止注入时忽略，用户可在页面稳定后重试。
   }
 }
 
