@@ -201,12 +201,26 @@ function buildCardMarkdown(request: CaptureRequest, level: CaptureLevel, cardTyp
     request.context.selectionText ? ["## 原文选区", "", blockquote(request.context.selectionText), ""].join("\n") : "",
     request.question ? ["## 问题", "", request.question, ""].join("\n") : "",
     request.answer ? ["## TWYR 回答", "", request.answer, ""].join("\n") : "",
+    request.conversation && request.conversation.length > 2
+      ? ["## 完整对话链路", "", formatConversation(request.conversation), ""].join("\n")
+      : "",
     request.note ? ["## 我的记录", "", request.note, ""].join("\n") : "",
     request.reason ? ["## 保存理由", "", request.reason, ""].join("\n") : "",
     request.context.surroundingText
       ? ["## 附近上下文", "", blockquote(trimText(request.context.surroundingText, 1200)), ""].join("\n")
       : "",
   ].join("\n");
+}
+
+function formatConversation(conversation: CaptureRequest["conversation"]): string {
+  return (conversation ?? [])
+    .filter((message) => message.content.trim())
+    .slice(-12)
+    .map((message) => {
+      const role = message.role === "assistant" ? "TWYR" : "用户";
+      return [`### ${role}`, "", trimText(message.content, 2000)].join("\n");
+    })
+    .join("\n\n");
 }
 
 function buildSourceMarkdown(request: PromoteSourceRequest): string {

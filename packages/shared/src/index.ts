@@ -70,11 +70,19 @@ export interface SaveRecommendation {
   reason: string;
 }
 
+export type TwyrConversationRole = "user" | "assistant";
+
+export interface TwyrConversationMessage {
+  role: TwyrConversationRole;
+  content: string;
+}
+
 export interface AskRequest {
   context: ReadingContext;
   question: string;
   mode?: TwyrActionMode;
   forceRetrieval?: boolean;
+  conversation?: TwyrConversationMessage[];
 }
 
 export interface AskResponse {
@@ -92,6 +100,7 @@ export interface CaptureRequest {
   level?: CaptureLevel;
   question?: string;
   answer?: string;
+  conversation?: TwyrConversationMessage[];
   note?: string;
   reason?: string;
 }

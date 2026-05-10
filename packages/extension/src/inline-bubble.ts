@@ -3,6 +3,7 @@ import type {
   CaptureResponse,
   ReadingContext,
   RetrieveResponse,
+  TwyrConversationMessage,
 } from "@twyr/shared";
 import type { PendingAction, RuntimeMessage } from "./messages.js";
 
@@ -158,6 +159,7 @@ async function sendQuestion(options: InlineBubbleOptions): Promise<void> {
   const question = textarea?.value.trim() || DEFAULT_QUESTION;
   if (!currentContext || isBusy || !question) return;
 
+  const conversation = buildConversationHistory();
   lastQuestion = question;
   messages.push({ role: "user", content: question });
   if (textarea) textarea.value = "";
@@ -171,6 +173,7 @@ async function sendQuestion(options: InlineBubbleOptions): Promise<void> {
         context: currentContext,
         question,
         mode: "freeform",
+        conversation,
       },
     });
     lastAnswer = response.answer;
@@ -197,6 +200,7 @@ async function saveCurrentThread(options: InlineBubbleOptions): Promise<void> {
         level: "card",
         question: lastQuestion || undefined,
         answer: lastAnswer || undefined,
+        conversation: buildConversationHistory(),
         reason: lastQuestion
           ? "用户在 Inline Codex 对话中保存了选区、问题和回答。"
           : "用户在 Inline Codex 对话中保存了当前阅读上下文。",
@@ -257,6 +261,17 @@ async function sendInlineRequest<T>(message: RuntimeMessage): Promise<T> {
     throw new Error(response?.error || "TWYR 请求失败");
   }
   return response.data;
+}
+
+function buildConversationHistory(): TwyrConversationMessage[] {
+  return messages
+    .filter((message): message is InlineMessage & { role: "user" | "assistant" } => {
+      return message.role === "user" || message.role === "assistant";
+    })
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
 }
 
 function positionBubble(): void {

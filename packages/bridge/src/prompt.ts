@@ -3,6 +3,7 @@ import type {
   ReadingContext,
   RetrievalDecision,
   SaveRecommendation,
+  TwyrConversationMessage,
   TwyrActionMode,
 } from "@twyr/shared";
 import { trimText } from "./markdown.js";
@@ -25,6 +26,7 @@ export function buildAskPrompt(params: {
   question: string;
   mode: TwyrActionMode;
   retrieval: RetrievalDecision;
+  conversation?: TwyrConversationMessage[];
 }): string {
   return [
     "你是 TWYR（Thinking, when you are reading!）的本地阅读思考代理。",
@@ -37,6 +39,7 @@ export function buildAskPrompt(params: {
     "- 不要修改文件，不要执行命令。TWYR Bridge 会负责写入。",
     "- 不确定时明确说“这是推测”。",
     "- 简单术语解释要短；观点判断、项目关联、写作素材要展开。",
+    "- 如果用户问题是追问，先参考本页对话历史，但不要把上一轮回答当成网页事实来源。",
     "- 全文入库只能建议，不能当成已经保存。",
     "",
     "保存分级：",
@@ -62,6 +65,9 @@ export function buildAskPrompt(params: {
     "检索决策：",
     JSON.stringify(params.retrieval, null, 2),
     "",
+    "本页对话历史：",
+    buildConversationPrompt(params.conversation),
+    "",
     "当前网页上下文：",
     JSON.stringify(
       {
@@ -73,6 +79,18 @@ export function buildAskPrompt(params: {
       2,
     ),
   ].join("\n");
+}
+
+function buildConversationPrompt(conversation: TwyrConversationMessage[] | undefined): string {
+  const usefulMessages = (conversation ?? [])
+    .filter((message) => message.content.trim())
+    .slice(-8)
+    .map((message) => ({
+      role: message.role,
+      content: trimText(message.content, 1200),
+    }));
+  if (!usefulMessages.length) return "无。";
+  return JSON.stringify(usefulMessages, null, 2);
 }
 
 export function parseModelAnswer(rawOutput: string): ParsedModelAnswer {

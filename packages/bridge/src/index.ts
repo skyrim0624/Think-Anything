@@ -111,6 +111,7 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
     question: body.question,
     mode,
     retrieval: decision,
+    conversation: body.conversation,
   });
   let output: Awaited<ReturnType<typeof runCodexPrompt>>;
   try {
