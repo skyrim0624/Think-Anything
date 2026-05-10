@@ -36,8 +36,8 @@ TWYR 的主体验不应继续停留在“选中文字后打开侧边栏”。新
 | 1 | 已完成 | 建立 Inline Bubble 消息协议和快捷键入口 | `Option+V` 打开原位输入框，`Option+S` 快速保存入口 |
 | 2 | 已完成 | 完成 Inline Bubble MVP | 选区旁输入、发送、回答、继续追问、关闭 |
 | 3 | 已完成 | 接入知识动作 | 保存、查旧笔记、展开工作台 |
-| 4 | 进行中 | 强化知识沉淀策略 | 保存问答链路、卡片元数据、检索理由展示 |
-| 5 | 未开始 | 验证与收口 | Chrome 实测、README 更新、最终计划状态同步 |
+| 4 | 已完成 | 强化知识沉淀策略 | 保存问答链路、卡片元数据、检索理由展示 |
+| 5 | 已完成 | 验证与收口 | 代码构建已通过；临时 Chromium 已加载扩展并验证 Inline Bubble 出现 |
 
 ## MVP 边界
 
@@ -59,4 +59,13 @@ TWYR 的主体验不应继续停留在“选中文字后打开侧边栏”。新
 ## 提交记录
 
 - `e3d8d89`：初始化 TWYR Git 仓库，写入 Inline Codex 更新计划，并推送到 `https://github.com/skyrim0624/twyr`。
-- 待提交：实现 Inline Codex Bubble、`Option+V` 原位提问、`Option+S` 快速保存、保存/查库/展开动作，并更新 README。
+- `d90cc6f`：标记仓库初始化步骤完成，并同步计划状态。
+- `3dd73da`：实现 Inline Codex Bubble、`Option+V` 原位提问、`Option+S` 快速保存、保存/查库/展开动作，并更新 README。
+- `b447eec`：增加页面内快捷键兜底，修复重复打开提示，避免 TWYR 对话框内抢快捷键。
+
+## 验证记录
+
+- `npm run check && npm run build` 已通过。
+- 构建产物已生成到 `packages/extension/dist`，Chrome 加载的本地扩展路径保持不变。
+- 临时 Chromium 使用 `packages/extension/dist` 加载 TWYR 扩展后，已验证 `Option+V` 能在选区旁打开 Inline Bubble，页面上出现标题、站点、选区字数、输入框和操作按钮。
+- 当前已登录 Chrome 仍需要在 `chrome://extensions` 对 TWYR 点一次 reload，才能使用刚刚生成的最新构建。
