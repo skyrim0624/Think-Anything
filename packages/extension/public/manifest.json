@@ -1,0 +1,59 @@
+{
+  "manifest_version": 3,
+  "name": "TWYR",
+  "version": "0.1.0",
+  "description": "Thinking, when you are reading! 在 Chrome 阅读现场呼出 Codex，并沉淀到 Obsidian。",
+  "permissions": [
+    "activeTab",
+    "commands",
+    "contextMenus",
+    "sidePanel",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "side_panel": {
+    "default_path": "side-panel.html"
+  },
+  "action": {
+    "default_title": "TWYR"
+  },
+  "commands": {
+    "open_twyr": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+K",
+        "mac": "Command+Shift+K"
+      },
+      "description": "打开 TWYR 讨论面板"
+    },
+    "quick_capture": {
+      "suggested_key": {
+        "default": "Alt+Shift+T",
+        "mac": "Alt+Shift+T"
+      },
+      "description": "快速保存当前选区"
+    },
+    "toggle_toolbar": {
+      "suggested_key": {
+        "default": "Alt+Shift+Y",
+        "mac": "Alt+Shift+Y"
+      },
+      "description": "开启或关闭本页 TWYR 选区工具条"
+    }
+  }
+}

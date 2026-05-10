@@ -1,0 +1,21 @@
+{
+  "name": "twyr",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TWYR: Thinking, when you are reading!",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @twyr/shared && npm run build -w @twyr/bridge && npm run build -w @twyr/extension",
+    "check": "npm run build -w @twyr/shared && npm run check -w @twyr/bridge && npm run check -w @twyr/extension",
+    "dev:bridge": "npm run dev -w @twyr/bridge",
+    "start:bridge": "npm run start -w @twyr/bridge",
+    "build:extension": "npm run build -w @twyr/extension"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "typescript": "^6.0.3"
+  }
+}

@@ -1,0 +1,283 @@
+import type { PendingAction, RuntimeMessage } from "./messages.js";
+import { PENDING_ACTION_KEY } from "./messages.js";
+
+const MENU_IDS = {
+  enableToolbar: "twyr-enable-toolbar",
+  disableToolbar: "twyr-disable-toolbar",
+  explain: "twyr-explain-selection",
+  challenge: "twyr-challenge-selection",
+  connect: "twyr-connect-notes",
+  capture: "twyr-capture-selection",
+  promote: "twyr-promote-page",
+} as const;
+
+let standaloneWindowId: number | undefined;
+let standaloneOpenPromise: Promise<void> | undefined;
+
+chrome.runtime.onInstalled.addListener(() => {
+  void setupContextMenus();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  void setupContextMenus();
+});
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  if (standaloneWindowId === windowId) {
+    standaloneWindowId = undefined;
+  }
+});
+
+chrome.action.onClicked.addListener((tab) => {
+  void openPanel(tab.id, {
+    kind: "ask",
+    mode: "freeform",
+    createdAt: Date.now(),
+  });
+});
+
+chrome.commands.onCommand.addListener((command) => {
+  void (async () => {
+    const tab = await getActiveTab();
+    if (!tab?.id) return;
+    if (command === "open_twyr") {
+      await openStandalonePanel(tab.id, { kind: "ask", mode: "explain", createdAt: Date.now() });
+    }
+    if (command === "quick_capture") {
+      await openStandalonePanel(tab.id, { kind: "capture", mode: "capture", createdAt: Date.now() });
+    }
+    if (command === "toggle_toolbar") {
+      await toggleToolbar(tab.id);
+    }
+  })();
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (!tab?.id) return;
+  if (info.menuItemId === MENU_IDS.enableToolbar) {
+    void setToolbarEnabled(tab.id, true);
+    return;
+  }
+  if (info.menuItemId === MENU_IDS.disableToolbar) {
+    void setToolbarEnabled(tab.id, false);
+    return;
+  }
+  const action = actionFromMenu(info.menuItemId);
+  if (!action) return;
+  if (info.selectionText && action.kind === "ask") {
+    action.question = defaultQuestionForMode(action.mode);
+  }
+  void openPanel(tab.id, action);
+});
+
+chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
+  if (message.type !== "TWYR_OPEN_PANEL" && message.type !== "TWYR_SELECTION_CAPTURED") return false;
+  const tabId = sender.tab?.id;
+  if (!tabId) return false;
+  const openPromise =
+    message.type === "TWYR_OPEN_PANEL" && message.preferStandalone
+      ? openStandalonePanel(tabId, message.action)
+      : openPanel(tabId, message.action);
+  openPromise
+    .then(() => sendResponse({ ok: true }))
+    .catch((error) => sendResponse({ ok: false, error: String(error) }));
+  return true;
+});
+
+async function setupContextMenus(): Promise<void> {
+  await chrome.contextMenus.removeAll();
+  await chrome.contextMenus.create({
+    id: MENU_IDS.enableToolbar,
+    title: "TWYR：本页开启选区工具条",
+    contexts: ["page", "selection"],
+  });
+  await chrome.contextMenus.create({
+    id: MENU_IDS.disableToolbar,
+    title: "TWYR：本页关闭选区工具条",
+    contexts: ["page", "selection"],
+  });
+  await chrome.contextMenus.create({
+    id: MENU_IDS.explain,
+    title: "TWYR：解释选中内容",
+    contexts: ["selection"],
+  });
+  await chrome.contextMenus.create({
+    id: MENU_IDS.challenge,
+    title: "TWYR：挑战这个观点",
+    contexts: ["selection"],
+  });
+  await chrome.contextMenus.create({
+    id: MENU_IDS.connect,
+    title: "TWYR：联系旧笔记",
+    contexts: ["selection", "page"],
+  });
+  await chrome.contextMenus.create({
+    id: MENU_IDS.capture,
+    title: "TWYR：快速保存",
+    contexts: ["selection", "page"],
+  });
+  await chrome.contextMenus.create({
+    id: MENU_IDS.promote,
+    title: "TWYR：建议全文入库",
+    contexts: ["page", "selection"],
+  });
+}
+
+async function openPanel(tabId: number | undefined, action: PendingAction): Promise<void> {
+  if (!tabId) return;
+  await ensureContentScript(tabId);
+  await chrome.storage.local.set({ [PENDING_ACTION_KEY]: withSourceTab(action, tabId) });
+  try {
+    await chrome.sidePanel.setOptions({ tabId, path: "side-panel.html", enabled: true });
+    await chrome.sidePanel.open({ tabId });
+  } catch {
+    await openStandalonePanel(tabId, action, true);
+  }
+}
+
+async function openStandalonePanel(
+  tabId: number,
+  action: PendingAction,
+  contentScriptEnsured = false,
+): Promise<void> {
+  if (!contentScriptEnsured) {
+    await ensureContentScript(tabId);
+  }
+  await chrome.storage.local.set({ [PENDING_ACTION_KEY]: withSourceTab(action, tabId) });
+  if (standaloneOpenPromise) {
+    await standaloneOpenPromise.catch(() => undefined);
+  }
+  standaloneOpenPromise = openOrReuseStandaloneWindow(buildStandalonePanelUrl(action));
+  try {
+    await standaloneOpenPromise;
+  } finally {
+    standaloneOpenPromise = undefined;
+  }
+}
+
+async function setToolbarEnabled(tabId: number, enabled: boolean): Promise<void> {
+  const ready = await ensureContentScript(tabId);
+  if (!ready) return;
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "TWYR_SET_TOOLBAR_ENABLED", enabled });
+  } catch {
+    // 部分页内脚本环境会在导航瞬间失效，忽略即可，下一次页面稳定后可重新开启。
+  }
+}
+
+async function toggleToolbar(tabId: number): Promise<void> {
+  const ready = await ensureContentScript(tabId);
+  if (!ready) return;
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "TWYR_TOGGLE_TOOLBAR" });
+  } catch {
+    // 同上，避免快捷键在不可注入页面制造后台错误。
+  }
+}
+
+function withSourceTab(action: PendingAction, tabId: number): PendingAction {
+  return { ...action, sourceTabId: tabId };
+}
+
+function actionFromMenu(menuItemId: string | number): PendingAction | null {
+  const createdAt = Date.now();
+  switch (menuItemId) {
+    case MENU_IDS.explain:
+      return { kind: "ask", mode: "explain", createdAt };
+    case MENU_IDS.challenge:
+      return { kind: "ask", mode: "challenge", createdAt };
+    case MENU_IDS.connect:
+      return { kind: "ask", mode: "connect", question: "结合我的旧笔记，帮我理解这段内容。", createdAt };
+    case MENU_IDS.capture:
+      return { kind: "capture", mode: "capture", createdAt };
+    case MENU_IDS.promote:
+      return { kind: "promote", mode: "promote", createdAt };
+    default:
+      return null;
+  }
+}
+
+function defaultQuestionForMode(mode: PendingAction["mode"]): string {
+  if (mode === "challenge") return "请拆解并挑战这段话的论证。";
+  if (mode === "connect") return "结合我的旧笔记，帮我理解这段内容。";
+  return "解释这段内容，并指出它是否值得保存。";
+}
+
+async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tabs[0];
+}
+
+async function ensureContentScript(tabId: number): Promise<boolean> {
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "TWYR_GET_CONTEXT" });
+    return true;
+  } catch {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ["content.js"],
+      });
+      await chrome.tabs.sendMessage(tabId, { type: "TWYR_GET_CONTEXT" });
+      return true;
+    } catch {
+      // Chrome 内部页面等不可注入，侧边栏会显示当前页面不可读取。
+      return false;
+    }
+  }
+}
+
+function buildStandalonePanelUrl(action: PendingAction): string {
+  return chrome.runtime.getURL(`side-panel.html?action=${action.createdAt}`);
+}
+
+async function openOrReuseStandaloneWindow(url: string): Promise<void> {
+  const existingWindowId = await findStandaloneWindowId();
+  if (existingWindowId) {
+    standaloneWindowId = existingWindowId;
+    await chrome.windows.update(existingWindowId, { focused: true });
+    const existingWindow = await chrome.windows.get(existingWindowId, { populate: true });
+    const panelTab = existingWindow.tabs?.find((tab) => isStandalonePanelUrl(tab.url));
+    if (panelTab?.id) {
+      await chrome.tabs.update(panelTab.id, { active: true, url });
+      return;
+    }
+    await chrome.tabs.create({ windowId: existingWindowId, active: true, url });
+    return;
+  }
+
+  const createdWindow = await chrome.windows.create({
+    url,
+    type: "popup",
+    width: 440,
+    height: 760,
+    focused: true,
+  });
+  if (!createdWindow?.id) {
+    throw new Error("TWYR 小窗口创建失败");
+  }
+  standaloneWindowId = createdWindow.id;
+}
+
+async function findStandaloneWindowId(): Promise<number | undefined> {
+  if (standaloneWindowId) {
+    try {
+      const existingWindow = await chrome.windows.get(standaloneWindowId, { populate: true });
+      if (existingWindow.tabs?.some((tab) => isStandalonePanelUrl(tab.url))) {
+        return standaloneWindowId;
+      }
+    } catch {
+      standaloneWindowId = undefined;
+    }
+  }
+
+  const windows = await chrome.windows.getAll({ populate: true });
+  const panelWindow = windows.find((window) =>
+    window.tabs?.some((tab) => isStandalonePanelUrl(tab.url)),
+  );
+  return panelWindow?.id;
+}
+
+function isStandalonePanelUrl(url: string | undefined): boolean {
+  return Boolean(url?.startsWith(chrome.runtime.getURL("side-panel.html")));
+}
