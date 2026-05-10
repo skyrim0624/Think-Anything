@@ -1,8 +1,11 @@
 import type {
   AskResponse,
   CaptureResponse,
+  CaptureLevel,
   ReadingContext,
   RetrieveResponse,
+  SaveRecommendation,
+  TwyrCardType,
   TwyrConversationMessage,
 } from "@twyr/shared";
 import type { PendingAction, RuntimeMessage } from "./messages.js";
@@ -33,6 +36,7 @@ let messages: InlineMessage[] = [];
 let lastQuestion = "";
 let lastAnswer = "";
 let lastThreadPath = "";
+let lastSaveRecommendation: SaveRecommendation | undefined;
 let isBusy = false;
 
 export function openInlineBubble(options: InlineBubbleOptions): void {
@@ -43,6 +47,7 @@ export function openInlineBubble(options: InlineBubbleOptions): void {
   lastQuestion = "";
   lastAnswer = "";
   lastThreadPath = "";
+  lastSaveRecommendation = undefined;
   isBusy = false;
   ensureBubble(options);
   positionBubble();
@@ -82,6 +87,7 @@ export function closeInlineBubble(): void {
   lastQuestion = "";
   lastAnswer = "";
   lastThreadPath = "";
+  lastSaveRecommendation = undefined;
   isBusy = false;
 }
 
@@ -151,6 +157,7 @@ function renderBubble(options: InlineBubbleOptions): void {
   if (sendButton) sendButton.textContent = isBusy ? "处理中" : "发送";
   if (sendButton) sendButton.toggleAttribute("disabled", isBusy);
   if (saveButton) saveButton.toggleAttribute("disabled", isBusy || !currentContext);
+  if (saveButton) saveButton.title = buildSaveButtonTitle();
   if (retrieveButton) retrieveButton.toggleAttribute("disabled", isBusy || !currentContext);
   if (textarea && !textarea.value.trim() && !lastQuestion) textarea.placeholder = DEFAULT_QUESTION;
 
@@ -181,6 +188,7 @@ async function sendQuestion(options: InlineBubbleOptions): Promise<void> {
     });
     lastAnswer = response.answer;
     lastThreadPath = response.threadPath;
+    lastSaveRecommendation = response.saveRecommendation;
     messages.push({ role: "assistant", content: response.answer });
   } catch (error) {
     messages.push({ role: "system", content: error instanceof Error ? error.message : String(error) });
@@ -196,28 +204,55 @@ async function saveCurrentThread(options: InlineBubbleOptions): Promise<void> {
   isBusy = true;
   renderBubble(options);
   try {
+    const capturePlan = buildCapturePlan(currentContext);
     const response = await sendInlineRequest<CaptureResponse>({
       type: "TWYR_INLINE_CAPTURE",
       body: {
         context: currentContext,
-        cardType: currentContext.selectionText ? "quote" : "insight",
-        level: "card",
+        cardType: capturePlan.cardType,
+        level: capturePlan.level,
         question: lastQuestion || undefined,
         answer: lastAnswer || undefined,
         conversation: buildConversationHistory(),
         threadPath: lastThreadPath || undefined,
-        reason: lastQuestion
-          ? "用户在 Inline Codex 对话中保存了选区、问题和回答。"
-          : "用户在 Inline Codex 对话中保存了当前阅读上下文。",
+        reason: capturePlan.reason,
       },
     });
-    messages.push({ role: "system", content: `已保存到 ${response.path}` });
+    messages.push({ role: "system", content: `已保存为 ${response.level}/${response.cardType}：${response.path}` });
   } catch (error) {
     messages.push({ role: "system", content: error instanceof Error ? error.message : String(error) });
   } finally {
     isBusy = false;
     renderBubble(options);
   }
+}
+
+function buildCapturePlan(context: ReadingContext): { level: CaptureLevel; cardType: TwyrCardType; reason: string } {
+  const fallbackCardType: TwyrCardType = context.selectionText ? "quote" : "insight";
+  const fallbackReason = lastQuestion
+    ? "用户在 Inline Codex 对话中保存了选区、问题和回答。"
+    : "用户在 Inline Codex 对话中保存了当前阅读上下文。";
+  if (!lastSaveRecommendation) {
+    return {
+      level: "card",
+      cardType: fallbackCardType,
+      reason: fallbackReason,
+    };
+  }
+  const sourceCaveat = lastSaveRecommendation.shouldPromoteSource
+    ? "AI 建议这篇材料值得全文入库；本次只保存卡片，全文入库仍需用户二次确认。"
+    : "";
+  return {
+    level: lastSaveRecommendation.level === "source" ? "card" : lastSaveRecommendation.level,
+    cardType: lastSaveRecommendation.cardType,
+    reason: [fallbackReason, `AI 保存建议：${lastSaveRecommendation.reason}`, sourceCaveat].filter(Boolean).join("\n\n"),
+  };
+}
+
+function buildSaveButtonTitle(): string {
+  if (!lastSaveRecommendation) return "保存到 TWYR";
+  const level = lastSaveRecommendation.level === "source" ? "card" : lastSaveRecommendation.level;
+  return `按 AI 建议保存为 ${level}/${lastSaveRecommendation.cardType}`;
 }
 
 async function retrieveRelatedNotes(options: InlineBubbleOptions): Promise<void> {
