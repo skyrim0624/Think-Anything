@@ -428,20 +428,22 @@ function buildShell(): string {
       .bubble {
         position: relative;
         overflow: hidden;
-        border: 1px solid rgba(15, 23, 42, 0.14);
+        border: 1px solid rgba(17, 24, 39, 0.08);
         border-radius: 8px;
-        background: rgba(255, 255, 255, 0.96);
-        color: #17202a;
-        box-shadow: 0 16px 48px rgba(15, 23, 42, 0.22), 0 1px 2px rgba(15, 23, 42, 0.14);
-        -webkit-backdrop-filter: saturate(1.2) blur(14px);
-        backdrop-filter: saturate(1.2) blur(14px);
+        background: rgba(255, 255, 255, 0.98);
+        color: #111827;
+        box-shadow: 0 18px 44px rgba(17, 24, 39, 0.11), 0 1px 1px rgba(17, 24, 39, 0.05);
+        -webkit-backdrop-filter: saturate(1.08) blur(18px);
+        backdrop-filter: saturate(1.08) blur(18px);
       }
 
       .close {
         min-width: 36px;
         width: 36px;
         padding: 7px 0;
-        color: #667085;
+        border-color: transparent;
+        background: transparent;
+        color: #6b7280;
         font-size: 18px;
         line-height: 1;
       }
@@ -460,38 +462,39 @@ function buildShell(): string {
 
       .message {
         max-width: 96%;
-        border: 1px solid rgba(15, 23, 42, 0.1);
+        border: 1px solid rgba(17, 24, 39, 0.08);
         border-radius: 8px;
-        padding: 8px 9px;
+        padding: 9px 10px;
         background: #ffffff;
+        box-shadow: 0 1px 0 rgba(17, 24, 39, 0.03);
       }
 
       .message-user {
         justify-self: end;
-        background: #eef4ff;
-        border-color: rgba(37, 99, 235, 0.2);
+        background: #fafafa;
+        border-color: rgba(17, 24, 39, 0.12);
       }
 
       .message-system {
         max-width: 100%;
-        background: #ecfdf3;
-        border-color: rgba(4, 120, 87, 0.2);
+        background: #fbfcfc;
+        border-color: rgba(17, 24, 39, 0.08);
       }
 
       .message-role {
         margin-bottom: 4px;
-        color: #667085;
+        color: #6b7280;
         font-size: 11px;
-        font-weight: 700;
+        font-weight: 620;
         line-height: 1.2;
       }
 
       .message-body {
         white-space: pre-wrap;
         overflow-wrap: anywhere;
-        color: #17202a;
+        color: #111827;
         font-size: 13px;
-        line-height: 1.55;
+        line-height: 1.6;
       }
 
       .composer {
@@ -503,24 +506,28 @@ function buildShell(): string {
 
       textarea {
         width: 100%;
-        min-height: 74px;
+        min-height: 86px;
         max-height: 180px;
         resize: vertical;
-        border: 1px solid rgba(15, 23, 42, 0.14);
+        border: 1px solid rgba(17, 24, 39, 0.1);
         border-radius: 8px;
-        padding: 9px 10px;
+        padding: 10px 11px;
         background: #ffffff;
-        color: #17202a;
+        color: #111827;
         font: inherit;
         font-size: 13px;
-        line-height: 1.5;
+        line-height: 1.6;
         outline: none;
+      }
+
+      textarea::placeholder {
+        color: #8b949e;
       }
 
       textarea:focus,
       button:focus-visible {
-        border-color: #0f766e;
-        box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.2);
+        border-color: rgba(17, 24, 39, 0.32);
+        box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.08);
         outline: none;
       }
 
@@ -541,20 +548,20 @@ function buildShell(): string {
       button {
         appearance: none;
         min-height: 36px;
-        border: 1px solid rgba(15, 23, 42, 0.12);
+        border: 1px solid rgba(17, 24, 39, 0.1);
         border-radius: 8px;
         background: #ffffff;
-        color: #17202a;
+        color: #111827;
         cursor: pointer;
         font: inherit;
         font-size: 12px;
-        font-weight: 650;
-        transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+        font-weight: 620;
+        transition: background 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms ease;
       }
 
       button:hover {
-        border-color: rgba(15, 23, 42, 0.22);
-        transform: translateY(-1px);
+        border-color: rgba(17, 24, 39, 0.2);
+        background: #fbfcfc;
       }
 
       button:active {
@@ -574,22 +581,22 @@ function buildShell(): string {
       .send-button {
         min-width: 64px;
         padding: 7px 12px;
-        border-color: #0f766e;
-        background: #0f766e;
+        border-color: #111827;
+        background: #111827;
         color: #ffffff;
       }
 
       .send-button:hover {
-        border-color: #115e59;
-        background: #115e59;
+        border-color: #000000;
+        background: #000000;
       }
 
       @media (prefers-color-scheme: dark) {
         .bubble {
           border-color: rgba(226, 232, 240, 0.14);
-          background: rgba(17, 24, 39, 0.96);
+          background: rgba(15, 18, 22, 0.96);
           color: #f8fafc;
-          box-shadow: 0 16px 48px rgba(0, 0, 0, 0.34), 0 1px 2px rgba(0, 0, 0, 0.28);
+          box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28), 0 1px 1px rgba(0, 0, 0, 0.18);
         }
 
         .composer {
@@ -604,7 +611,7 @@ function buildShell(): string {
 
         .message-role,
         .close {
-          color: #a7b0bd;
+          color: #aeb7c2;
         }
 
         .close,
@@ -612,17 +619,32 @@ function buildShell(): string {
         textarea,
         .message {
           border-color: rgba(226, 232, 240, 0.12);
-          background: #171d23;
+          background: #11161c;
         }
 
         .message-user {
-          background: rgba(96, 165, 250, 0.14);
-          border-color: rgba(96, 165, 250, 0.26);
+          background: rgba(248, 250, 252, 0.06);
+          border-color: rgba(226, 232, 240, 0.16);
         }
 
         .message-system {
-          background: rgba(22, 101, 52, 0.22);
-          border-color: rgba(74, 222, 128, 0.22);
+          background: rgba(248, 250, 252, 0.04);
+          border-color: rgba(226, 232, 240, 0.12);
+        }
+
+        .close {
+          background: transparent;
+        }
+
+        .send-button {
+          border-color: #f8fafc;
+          background: #f8fafc;
+          color: #111827;
+        }
+
+        .send-button:hover {
+          border-color: #ffffff;
+          background: #ffffff;
         }
       }
 
