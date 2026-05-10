@@ -55,6 +55,8 @@ printenv OPENAI_API_KEY | codex login --with-api-key
 
 ## 安装
 
+给朋友或另一个 AI Agent 安装时，优先把 [FRIEND_AGENT_INSTALL.md](./FRIEND_AGENT_INSTALL.md) 里的任务书整段发给对方 Agent。下面是人类手动安装说明。
+
 ```bash
 git clone https://github.com/skyrim0624/Think-Anything.git
 cd Think-Anything
