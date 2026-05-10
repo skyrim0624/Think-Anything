@@ -40,3 +40,4 @@
 - `npm run check && npm run build` 已通过。
 - `入库` 动作会先弹出确认；取消时只写入系统消息，不调用 Bridge。
 - 确认后会带上当前页面上下文、最近一次回答摘要、入库理由和 `threadPath`，由 Bridge 写入 `10-SOURCES/` 并更新 `40-MOC/来源索引.md`。
+- 临时 Chromium 已加载最新 `packages/extension/dist` 复验：`Option+V` 能打开 Bubble，按钮包含“入库”，点击后会弹出全文入库确认，取消时 Bubble 显示“已取消全文入库”。
