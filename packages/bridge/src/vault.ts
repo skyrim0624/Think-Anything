@@ -191,6 +191,7 @@ function buildCardMarkdown(request: CaptureRequest, level: CaptureLevel, cardTyp
     `sourceTitle: ${yamlString(request.context.source.title)}`,
     `site: ${yamlString(request.context.source.site)}`,
     `capturedAt: ${yamlString(new Date().toISOString())}`,
+    `threadPath: ${yamlString(request.threadPath)}`,
     `tags: ${yamlList(["twyr", cardType])}`,
     "---",
     "",
@@ -198,6 +199,7 @@ function buildCardMarkdown(request: CaptureRequest, level: CaptureLevel, cardTyp
     "",
     `来源：${request.context.source.url}`,
     "",
+    request.threadPath ? ["## 讨论线程", "", buildObsidianLink(request.threadPath, "打开完整阅读讨论"), ""].join("\n") : "",
     request.context.selectionText ? ["## 原文选区", "", blockquote(request.context.selectionText), ""].join("\n") : "",
     request.question ? ["## 问题", "", request.question, ""].join("\n") : "",
     request.answer ? ["## TWYR 回答", "", request.answer, ""].join("\n") : "",
@@ -210,6 +212,10 @@ function buildCardMarkdown(request: CaptureRequest, level: CaptureLevel, cardTyp
       ? ["## 附近上下文", "", blockquote(trimText(request.context.surroundingText, 1200)), ""].join("\n")
       : "",
   ].join("\n");
+}
+
+function buildObsidianLink(path: string, label: string): string {
+  return `[[${path.replace(/\.md$/, "")}|${label}]]`;
 }
 
 function formatConversation(conversation: CaptureRequest["conversation"]): string {

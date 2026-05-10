@@ -32,6 +32,7 @@ let currentContext: ReadingContext | undefined;
 let messages: InlineMessage[] = [];
 let lastQuestion = "";
 let lastAnswer = "";
+let lastThreadPath = "";
 let isBusy = false;
 
 export function openInlineBubble(options: InlineBubbleOptions): void {
@@ -41,6 +42,7 @@ export function openInlineBubble(options: InlineBubbleOptions): void {
     : [{ role: "system", content: "未检测到选区，将使用当前页面作为上下文。" }];
   lastQuestion = "";
   lastAnswer = "";
+  lastThreadPath = "";
   isBusy = false;
   ensureBubble(options);
   positionBubble();
@@ -79,6 +81,7 @@ export function closeInlineBubble(): void {
   messages = [];
   lastQuestion = "";
   lastAnswer = "";
+  lastThreadPath = "";
   isBusy = false;
 }
 
@@ -177,6 +180,7 @@ async function sendQuestion(options: InlineBubbleOptions): Promise<void> {
       },
     });
     lastAnswer = response.answer;
+    lastThreadPath = response.threadPath;
     messages.push({ role: "assistant", content: response.answer });
   } catch (error) {
     messages.push({ role: "system", content: error instanceof Error ? error.message : String(error) });
@@ -201,6 +205,7 @@ async function saveCurrentThread(options: InlineBubbleOptions): Promise<void> {
         question: lastQuestion || undefined,
         answer: lastAnswer || undefined,
         conversation: buildConversationHistory(),
+        threadPath: lastThreadPath || undefined,
         reason: lastQuestion
           ? "用户在 Inline Codex 对话中保存了选区、问题和回答。"
           : "用户在 Inline Codex 对话中保存了当前阅读上下文。",

@@ -101,6 +101,7 @@ export interface CaptureRequest {
   question?: string;
   answer?: string;
   conversation?: TwyrConversationMessage[];
+  threadPath?: string;
   note?: string;
   reason?: string;
 }
