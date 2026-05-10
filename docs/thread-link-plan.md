@@ -17,13 +17,24 @@
 | 步骤 | 状态 | 目标 | 交付物 |
 | --- | --- | --- | --- |
 | 0 | 已完成 | 建立本阶段计划 | `docs/thread-link-plan.md` |
-| 1 | 未开始 | 扩展保存协议 | `CaptureRequest.threadPath` |
-| 2 | 未开始 | Bubble 记住最近线程 | 保存时把 `AskResponse.threadPath` 传给 capture |
-| 3 | 未开始 | 卡片写入线程反链 | frontmatter 和正文写入讨论线程链接 |
-| 4 | 未开始 | 构建验证并提交推送 | `npm run check && npm run build` 通过 |
+| 1 | 已完成 | 扩展保存协议 | `CaptureRequest.threadPath` |
+| 2 | 已完成 | Bubble 记住最近线程 | 保存时把 `AskResponse.threadPath` 传给 capture |
+| 3 | 已完成 | 卡片写入线程反链 | frontmatter 和正文写入讨论线程链接 |
+| 4 | 已完成 | 构建验证并提交推送 | `npm run check && npm run build` 通过 |
 
 ## 边界
 
 - 只链接最近一次成功 `/api/ask` 返回的线程。
 - 快速保存 `Option+S` 没有线程上下文时不强行制造线程。
 - 本轮不改变线程文件命名规则。
+
+## 提交记录
+
+- `10e7e37`：建立 Thread Link 更新计划。
+- `1e6e392`：实现保存卡片到阅读讨论线程的反链。
+
+## 验证记录
+
+- `npm run check && npm run build` 已通过。
+- `CaptureRequest.threadPath` 为可选字段；没有成功提问时快速保存不受影响。
+- 有成功 `/api/ask` 后再点保存，卡片 frontmatter 会写入 `threadPath`，正文会出现 `[[30-THREADS/...|打开完整阅读讨论]]`。
