@@ -44,6 +44,7 @@ export function openInlineBubble(options: InlineBubbleOptions): void {
   ensureBubble(options);
   positionBubble();
   renderBubble(options);
+  options.showToast("TWYR：原位对话已打开");
   getTextarea()?.focus();
 }
 
@@ -150,7 +151,6 @@ function renderBubble(options: InlineBubbleOptions): void {
   if (textarea && !textarea.value.trim() && !lastQuestion) textarea.placeholder = DEFAULT_QUESTION;
 
   positionBubble();
-  options.showToast("TWYR：原位对话已打开");
 }
 
 async function sendQuestion(options: InlineBubbleOptions): Promise<void> {

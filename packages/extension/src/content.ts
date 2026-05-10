@@ -3,6 +3,7 @@ import { closeInlineBubble, openInlineBubble, quickSaveInlineSelection } from ".
 import type { RuntimeMessage } from "./messages.js";
 
 const TOOLBAR_ID = "twyr-selection-toolbar";
+const INLINE_BUBBLE_HOST_ID = "twyr-inline-bubble-host";
 const TOAST_ID = "twyr-selection-toast";
 const STYLE_ID = "twyr-selection-style";
 const TOOLBAR_ESTIMATED_WIDTH = 304;
@@ -80,8 +81,23 @@ document.addEventListener("scroll", () => hideToolbar(), { passive: true });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeInlineBubble();
+    return;
   }
-});
+  if (isInlineBubbleEvent(event)) return;
+  if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.code === "KeyV") {
+    if (event.target instanceof Element && isEditableElement(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openInlineBubble({ captureContext: captureReadingContext, showToast });
+    return;
+  }
+  if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.code === "KeyS") {
+    if (event.target instanceof Element && isEditableElement(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void quickSaveInlineSelection({ captureContext: captureReadingContext, showToast });
+  }
+}, true);
 
 function captureReadingContext(): ReadingContext {
   const selection = window.getSelection();
@@ -400,6 +416,10 @@ function isEditableElement(element: Element): boolean {
 
 function isToolbarEvent(event: Event): boolean {
   return Boolean(event.target instanceof Element && event.target.closest(`#${TOOLBAR_ID}`));
+}
+
+function isInlineBubbleEvent(event: Event): boolean {
+  return Boolean(event.target instanceof Element && event.target.closest(`#${INLINE_BUBBLE_HOST_ID}`));
 }
 
 function startEditableGuard(): void {
