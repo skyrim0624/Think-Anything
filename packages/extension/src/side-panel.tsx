@@ -178,7 +178,7 @@ function App(): React.ReactElement {
 
   async function runPromote(): Promise<void> {
     if (!context || isBusy) return;
-    const confirmed = window.confirm("确认把当前网页全文保存到 TWYR 的 10-SOURCES 吗？");
+    const confirmed = window.confirm("确认把当前网页全文保存到 Think 的 10-SOURCES 吗？");
     if (!confirmed) return;
     setIsBusy(true);
     try {
@@ -206,14 +206,14 @@ function App(): React.ReactElement {
     <main className="app-shell">
       <header className="header">
         <div>
-          <div className="brand">TWYR</div>
-          <div className="subtitle">Thinking, when you are reading!</div>
+          <div className="brand">Think</div>
+          <div className="subtitle">thinking anytime</div>
         </div>
         <button
           className="icon-button"
           type="button"
           title="设置"
-          aria-label="打开 TWYR 设置"
+          aria-label="打开 Think 设置"
           onClick={() => setShowSettings((value) => !value)}
         >
           <Settings size={18} />
@@ -331,7 +331,7 @@ async function getCurrentWindowTabId(): Promise<number | undefined> {
 function MessageView({ message }: { message: Message }): React.ReactElement {
   return (
     <article className={`message message-${message.role}`}>
-      <div className="message-role">{message.role === "assistant" ? "TWYR" : message.role === "user" ? "你" : "系统"}</div>
+      <div className="message-role">{message.role === "assistant" ? "Think" : message.role === "user" ? "你" : "系统"}</div>
       <div className="message-body">{message.content}</div>
       {message.role === "assistant" && message.response ? (
         <div className="recommendation">

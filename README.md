@@ -1,14 +1,14 @@
-# TWYR
+# Think
 
-TWYR = Thinking, when you are reading!
+Think 是 TWYR 的 Chrome 插件显示名，表达的是“随时进入思考”。TWYR 仍作为项目代号、Bridge 环境变量和 Obsidian vault 名称保留。
 
-TWYR 是一个 Chrome + Obsidian + Codex 阅读知识工作台。Chrome 负责捕获阅读现场，本地 Bridge 负责调用 Codex、检索旧笔记和写入 Obsidian，TWYR vault 负责长期保存。
+Think 是一个 Chrome + Obsidian + Codex 阅读知识工作台。Chrome 负责捕获阅读现场，本地 Bridge 负责调用 Codex、检索旧笔记和写入 Obsidian，TWYR vault 负责长期保存。
 
 ## 项目结构
 
 - `packages/shared`：Chrome 扩展和 Bridge 共用的数据类型。
 - `packages/bridge`：本地 Node 服务，只监听 `127.0.0.1`。
-- `packages/extension`：Manifest V3 Chrome 扩展，包含右键菜单、快捷键、Side Panel 和选区浮动工具条。
+- `packages/extension`：Manifest V3 Chrome 扩展，显示名为 Think，包含右键菜单、快捷键、Side Panel 和选区浮动工具条。
 
 ## 本地启动
 
@@ -39,7 +39,7 @@ Bridge 日志位置：
 2. 开启开发者模式。
 3. 选择“加载已解压的扩展程序”。
 4. 选择 `packages/extension/dist`。
-5. 打开 TWYR 侧边栏，在设置里填写 `Bridge URL` 和 `token`。
+5. 打开 Think 侧边栏，在设置里填写 `Bridge URL` 和 `token`。
 
 默认 Bridge URL：
 
@@ -55,20 +55,20 @@ http://127.0.0.1:47321
 
 常用入口：
 
-- 选中文字后按 `Option+V`，会在选区附近打开 TWYR 原位对话框；输入问题后按 `Enter` 发送，`Shift+Enter` 换行，`Esc` 关闭。
-- 原位对话框里可以直接继续追问，也可以点 `保存`、`查库`、`入库`、`展开`。展开后会进入完整 TWYR 工作台。
+- 选中文字后按 `Option+V`，会在选区附近打开 Think 原位对话框；输入问题后按 `Enter` 发送，`Shift+Enter` 换行，`Esc` 关闭。
+- 原位对话框里可以直接继续追问，也可以点 `保存`、`查库`、`入库`、`展开`。展开后会进入完整 Think 工作台。
 - `保存` 会按 AI 的保存建议写入卡片，并带上选区、问题、回答、对话链路和讨论线程反链。
 - `入库` 会二次确认后把当前页面全文写入 `10-SOURCES/`；AI 只能建议全文入库，不能自动跳过确认。
-- 选中文字后按 `Option+S`，会把当前选区快速保存到 TWYR 知识库。
-- `Option+V` 和 `Option+S` 同时有页面内兜底监听；即使 Chrome 没登记扩展快捷键，普通阅读页面也能触发，但在输入框、编辑器和 TWYR 自己的对话框内不会抢快捷键。
-- 默认选中文字不会弹出 TWYR 工具条，避免干扰复制、翻译、搜索等日常操作。
-- 需要持续阅读讨论某个页面时，右键页面或选区，点 `TWYR：本页开启选区工具条`。
+- 选中文字后按 `Option+S`，会把当前选区快速保存到 Think 知识库。
+- `Option+V` 和 `Option+S` 同时有页面内兜底监听；即使 Chrome 没登记扩展快捷键，普通阅读页面也能触发，但在输入框、编辑器和 Think 自己的对话框内不会抢快捷键。
+- 默认选中文字不会弹出 Think 工具条，避免干扰复制、翻译、搜索等日常操作。
+- 需要持续阅读讨论某个页面时，右键页面或选区，点 `Think：本页开启选区工具条`。
 - 本页工具条开启后，选中文字会出现“问 / 反驳 / 旧笔记 / 保存 / 关”；点“关”会关闭本页工具条。
-- 临时只处理一次时，右键选中文字，直接使用 `TWYR：解释选中内容` 等菜单。
+- 临时只处理一次时，右键选中文字，直接使用 `Think：解释选中内容` 等菜单。
 - `Command+Shift+K` 打开讨论工作台。
-- `TWYR：本页开启选区工具条` 仍保留为右键菜单入口；如需快捷键，可在 `chrome://extensions/shortcuts` 自行绑定。
+- `Think：本页开启选区工具条` 仍保留为右键菜单入口；如需快捷键，可在 `chrome://extensions/shortcuts` 自行绑定。
 
-更新扩展代码后，需要在 `chrome://extensions/?id=njgpgdjaikleamljclcnaclacglahjie` 对 TWYR 点一次刷新按钮，让 Chrome 重新加载 `packages/extension/dist`。
+更新扩展代码后，需要在 `chrome://extensions/?id=njgpgdjaikleamljclcnaclacglahjie` 对 Think 点一次刷新按钮，让 Chrome 重新加载 `packages/extension/dist`。
 
 ## Codex 登录
 

@@ -135,37 +135,37 @@ async function setupContextMenus(): Promise<void> {
   await chrome.contextMenus.removeAll();
   await chrome.contextMenus.create({
     id: MENU_IDS.enableToolbar,
-    title: "TWYR：本页开启选区工具条",
+    title: "Think：本页开启选区工具条",
     contexts: ["page", "selection"],
   });
   await chrome.contextMenus.create({
     id: MENU_IDS.disableToolbar,
-    title: "TWYR：本页关闭选区工具条",
+    title: "Think：本页关闭选区工具条",
     contexts: ["page", "selection"],
   });
   await chrome.contextMenus.create({
     id: MENU_IDS.explain,
-    title: "TWYR：解释选中内容",
+    title: "Think：解释选中内容",
     contexts: ["selection"],
   });
   await chrome.contextMenus.create({
     id: MENU_IDS.challenge,
-    title: "TWYR：挑战这个观点",
+    title: "Think：挑战这个观点",
     contexts: ["selection"],
   });
   await chrome.contextMenus.create({
     id: MENU_IDS.connect,
-    title: "TWYR：联系旧笔记",
+    title: "Think：联系旧笔记",
     contexts: ["selection", "page"],
   });
   await chrome.contextMenus.create({
     id: MENU_IDS.capture,
-    title: "TWYR：快速保存",
+    title: "Think：快速保存",
     contexts: ["selection", "page"],
   });
   await chrome.contextMenus.create({
     id: MENU_IDS.promote,
-    title: "TWYR：建议全文入库",
+    title: "Think：建议全文入库",
     contexts: ["page", "selection"],
   });
 }
@@ -311,7 +311,7 @@ async function openOrReuseStandaloneWindow(url: string): Promise<void> {
     focused: true,
   });
   if (!createdWindow?.id) {
-    throw new Error("TWYR 小窗口创建失败");
+    throw new Error("Think 小窗口创建失败");
   }
   standaloneWindowId = createdWindow.id;
 }

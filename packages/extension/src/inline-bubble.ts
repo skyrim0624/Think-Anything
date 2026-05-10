@@ -53,14 +53,14 @@ export function openInlineBubble(options: InlineBubbleOptions): void {
   ensureBubble(options);
   positionBubble();
   renderBubble(options);
-  options.showToast("TWYR：原位对话已打开");
+  options.showToast("Think：原位对话已打开");
   getTextarea()?.focus();
 }
 
 export async function quickSaveInlineSelection(options: InlineBubbleOptions): Promise<void> {
   const context = options.captureContext();
   if (!context.selectionText) {
-    options.showToast("TWYR：请先选中文本再快速保存");
+    options.showToast("Think：请先选中文本再快速保存");
     return;
   }
   try {
@@ -73,7 +73,7 @@ export async function quickSaveInlineSelection(options: InlineBubbleOptions): Pr
         reason: "用户通过 Option+S 在阅读现场快速保存选区。",
       },
     });
-    options.showToast("TWYR：选区已保存");
+    options.showToast("Think：选区已保存");
   } catch (error) {
     options.showToast(error instanceof Error ? error.message : String(error));
   }
@@ -163,7 +163,7 @@ function renderBubble(options: InlineBubbleOptions): void {
   if (saveButton) saveButton.title = buildSaveButtonTitle();
   if (retrieveButton) retrieveButton.toggleAttribute("disabled", isBusy || !currentContext);
   if (promoteButton) promoteButton.toggleAttribute("disabled", isBusy || !currentContext);
-  if (promoteButton) promoteButton.title = "确认后将当前页面全文写入 TWYR 长期资料库";
+  if (promoteButton) promoteButton.title = "确认后将当前页面全文写入 Think 长期资料库";
   if (textarea && !textarea.value.trim() && !lastQuestion) textarea.placeholder = DEFAULT_QUESTION;
 
   positionBubble();
@@ -255,7 +255,7 @@ function buildCapturePlan(context: ReadingContext): { level: CaptureLevel; cardT
 }
 
 function buildSaveButtonTitle(): string {
-  if (!lastSaveRecommendation) return "保存到 TWYR";
+  if (!lastSaveRecommendation) return "保存到 Think";
   const level = lastSaveRecommendation.level === "source" ? "card" : lastSaveRecommendation.level;
   return `按 AI 建议保存为 ${level}/${lastSaveRecommendation.cardType}`;
 }
@@ -292,7 +292,7 @@ async function retrieveRelatedNotes(options: InlineBubbleOptions): Promise<void>
 
 async function promoteCurrentSource(options: InlineBubbleOptions): Promise<void> {
   if (!currentContext || isBusy) return;
-  const confirmed = window.confirm("确认将当前页面全文保存到 TWYR 的 10-SOURCES 吗？");
+  const confirmed = window.confirm("确认将当前页面全文保存到 Think 的 10-SOURCES 吗？");
   if (!confirmed) {
     messages.push({ role: "system", content: "已取消全文入库。" });
     renderBubble(options);
@@ -336,7 +336,7 @@ async function openExpandedWorkbench(): Promise<void> {
 
 function buildSourceSummary(): string {
   if (!lastAnswer) return "待整理。";
-  return `最近一次 TWYR 回答摘要：\n\n${lastAnswer.slice(0, 1800)}`;
+  return `最近一次 Think 回答摘要：\n\n${lastAnswer.slice(0, 1800)}`;
 }
 
 function buildPromoteReason(): string {
@@ -353,7 +353,7 @@ function buildPromoteReason(): string {
 async function sendInlineRequest<T>(message: RuntimeMessage): Promise<T> {
   const response = (await chrome.runtime.sendMessage(message)) as InlineApiResult<T>;
   if (!response?.ok) {
-    throw new Error(response?.error || "TWYR 请求失败");
+    throw new Error(response?.error || "Think 请求失败");
   }
   return response.data;
 }
@@ -663,14 +663,14 @@ function buildShell(): string {
         }
       }
     </style>
-    <section class="bubble" role="dialog" aria-label="TWYR 原位对话框">
+    <section class="bubble" role="dialog" aria-label="Think 原位对话框">
       <header class="header">
         <div>
-          <div class="brand">TWYR</div>
+          <div class="brand">Think</div>
           <div class="title" data-role="title"></div>
           <div class="context" data-role="context"></div>
         </div>
-        <button class="close" type="button" data-action="close" aria-label="关闭 TWYR 原位对话框">×</button>
+        <button class="close" type="button" data-action="close" aria-label="关闭 Think 原位对话框">×</button>
       </header>
       <div class="messages" data-role="messages" aria-live="polite"></div>
       <div class="composer">
@@ -692,7 +692,7 @@ function buildShell(): string {
 }
 
 function roleLabel(role: InlineRole): string {
-  if (role === "assistant") return "TWYR";
+  if (role === "assistant") return "Think";
   if (role === "user") return "你";
   return "系统";
 }

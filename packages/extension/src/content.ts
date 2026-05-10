@@ -174,7 +174,7 @@ function getToolbar(): HTMLElement {
   toolbar.className = "twyr-selection-toolbar";
   toolbar.hidden = true;
   toolbar.setAttribute("role", "toolbar");
-  toolbar.setAttribute("aria-label", "TWYR 选区工具条");
+  toolbar.setAttribute("aria-label", "Think 选区工具条");
   Object.assign(toolbar.style, {
     position: "absolute",
     zIndex: "2147483647",
@@ -207,9 +207,9 @@ function createDisableButton(): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.textContent = "关闭";
-  button.title = "关闭本页 TWYR 选区工具条";
+  button.title = "关闭本页 Think 选区工具条";
   button.className = "twyr-selection-button twyr-selection-button-disable";
-  button.setAttribute("aria-label", "关闭本页 TWYR 选区工具条");
+  button.setAttribute("aria-label", "关闭本页 Think 选区工具条");
   button.addEventListener("mousedown", (event) => event.preventDefault());
   button.addEventListener("click", () => setToolbarEnabled(false));
   return button;
@@ -229,33 +229,33 @@ async function openTwyrFromToolbar(mode: "explain" | "challenge" | "connect" | "
       preferStandalone: true,
     });
     if (!response?.ok) {
-      showToast("TWYR 打开失败，请试试右键菜单");
+      showToast("Think 打开失败，请试试右键菜单");
       return;
     }
     hideToolbar();
   } catch {
-    showToast("TWYR 打开失败，请试试右键菜单");
+    showToast("Think 打开失败，请试试右键菜单");
   }
 }
 
 function toolbarTitle(mode: "explain" | "challenge" | "connect" | "capture"): string {
-  if (mode === "challenge") return "用 TWYR 挑战这段观点";
-  if (mode === "connect") return "用 TWYR 联系旧笔记";
-  if (mode === "capture") return "保存到 TWYR";
-  return "用 TWYR 解释这段内容";
+  if (mode === "challenge") return "用 Think 挑战这段观点";
+  if (mode === "connect") return "用 Think 联系旧笔记";
+  if (mode === "capture") return "保存到 Think";
+  return "用 Think 解释这段内容";
 }
 
 function setToolbarEnabled(enabled: boolean): void {
   toolbarEnabled = enabled;
   if (enabled) {
     startEditableGuard();
-    showToast("TWYR 选区工具条已开启");
+    showToast("Think 选区工具条已开启");
     updateToolbar();
     return;
   }
   stopEditableGuard();
   hideToolbar();
-  showToast("TWYR 选区工具条已关闭");
+  showToast("Think 选区工具条已关闭");
 }
 
 function hideToolbar(): void {

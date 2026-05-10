@@ -1,8 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "TWYR",
+  "name": "Think",
+  "short_name": "Think",
   "version": "0.1.0",
-  "description": "Thinking, when you are reading! 在 Chrome 阅读现场呼出 Codex，并沉淀到 Obsidian。",
+  "description": "随时在 Chrome 阅读现场呼出 AI 思考、追问、查库，并沉淀到 Obsidian。",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "permissions": [
     "activeTab",
     "commands",
@@ -31,7 +38,13 @@
     "default_path": "side-panel.html"
   },
   "action": {
-    "default_title": "TWYR"
+    "default_title": "Think",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
   },
   "commands": {
     "open_inline": {
@@ -39,24 +52,24 @@
         "default": "Alt+V",
         "mac": "Alt+V"
       },
-      "description": "在选区旁打开 TWYR 原位对话框"
+      "description": "在选区旁打开 Think 原位对话框"
     },
     "open_twyr": {
       "suggested_key": {
         "default": "Ctrl+Shift+K",
         "mac": "Command+Shift+K"
       },
-      "description": "打开 TWYR 讨论面板"
+      "description": "打开 Think 讨论面板"
     },
     "quick_capture": {
       "suggested_key": {
         "default": "Alt+S",
         "mac": "Alt+S"
       },
-      "description": "快速保存当前选区到 TWYR"
+      "description": "快速保存当前选区到 Think"
     },
     "toggle_toolbar": {
-      "description": "开启或关闭本页 TWYR 选区工具条"
+      "description": "开启或关闭本页 Think 选区工具条"
     }
   }
 }

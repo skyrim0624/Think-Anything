@@ -46,5 +46,6 @@ await build({
 });
 
 cpSync(join(root, "public/manifest.json"), join(dist, "manifest.json"));
+cpSync(join(root, "public/icons"), join(dist, "icons"), { recursive: true });
 cpSync(join(root, "side-panel.html"), join(dist, "side-panel.html"));
 cpSync(join(root, "src/styles.css"), join(dist, "styles.css"));
