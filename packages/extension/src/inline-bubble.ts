@@ -2,6 +2,7 @@ import type {
   AskResponse,
   CaptureResponse,
   CaptureLevel,
+  PromoteSourceResponse,
   ReadingContext,
   RetrieveResponse,
   SaveRecommendation,
@@ -122,6 +123,7 @@ function bindEvents(options: InlineBubbleOptions): void {
   getButton("send")?.addEventListener("click", () => void sendQuestion(options));
   getButton("save")?.addEventListener("click", () => void saveCurrentThread(options));
   getButton("retrieve")?.addEventListener("click", () => void retrieveRelatedNotes(options));
+  getButton("promote")?.addEventListener("click", () => void promoteCurrentSource(options));
   getButton("expand")?.addEventListener("click", () => void openExpandedWorkbench());
   getButton("close")?.addEventListener("click", closeInlineBubble);
 }
@@ -134,6 +136,7 @@ function renderBubble(options: InlineBubbleOptions): void {
   const sendButton = getButton("send");
   const saveButton = getButton("save");
   const retrieveButton = getButton("retrieve");
+  const promoteButton = getButton("promote");
   const textarea = getTextarea();
 
   if (title) title.textContent = currentContext.source.title || "当前页面";
@@ -159,6 +162,8 @@ function renderBubble(options: InlineBubbleOptions): void {
   if (saveButton) saveButton.toggleAttribute("disabled", isBusy || !currentContext);
   if (saveButton) saveButton.title = buildSaveButtonTitle();
   if (retrieveButton) retrieveButton.toggleAttribute("disabled", isBusy || !currentContext);
+  if (promoteButton) promoteButton.toggleAttribute("disabled", isBusy || !currentContext);
+  if (promoteButton) promoteButton.title = "确认后将当前页面全文写入 TWYR 长期资料库";
   if (textarea && !textarea.value.trim() && !lastQuestion) textarea.placeholder = DEFAULT_QUESTION;
 
   positionBubble();
@@ -285,6 +290,40 @@ async function retrieveRelatedNotes(options: InlineBubbleOptions): Promise<void>
   }
 }
 
+async function promoteCurrentSource(options: InlineBubbleOptions): Promise<void> {
+  if (!currentContext || isBusy) return;
+  const confirmed = window.confirm("确认将当前页面全文保存到 TWYR 的 10-SOURCES 吗？");
+  if (!confirmed) {
+    messages.push({ role: "system", content: "已取消全文入库。" });
+    renderBubble(options);
+    return;
+  }
+
+  isBusy = true;
+  renderBubble(options);
+  try {
+    const response = await sendInlineRequest<PromoteSourceResponse>({
+      type: "TWYR_INLINE_PROMOTE_SOURCE",
+      body: {
+        context: currentContext,
+        confirmed: true,
+        summary: buildSourceSummary(),
+        reason: buildPromoteReason(),
+        threadPath: lastThreadPath || undefined,
+      },
+    });
+    messages.push({
+      role: "system",
+      content: `全文已入库：${response.sourcePath}\n索引已更新：${response.mocPath}`,
+    });
+  } catch (error) {
+    messages.push({ role: "system", content: error instanceof Error ? error.message : String(error) });
+  } finally {
+    isBusy = false;
+    renderBubble(options);
+  }
+}
+
 async function openExpandedWorkbench(): Promise<void> {
   const action: PendingAction = {
     kind: "ask",
@@ -293,6 +332,22 @@ async function openExpandedWorkbench(): Promise<void> {
     createdAt: Date.now(),
   };
   await chrome.runtime.sendMessage({ type: "TWYR_OPEN_PANEL", action, preferStandalone: true });
+}
+
+function buildSourceSummary(): string {
+  if (!lastAnswer) return "待整理。";
+  return `最近一次 TWYR 回答摘要：\n\n${lastAnswer.slice(0, 1800)}`;
+}
+
+function buildPromoteReason(): string {
+  const reasons = ["用户在 Inline Bubble 中确认全文入库。"];
+  if (lastSaveRecommendation?.shouldPromoteSource) {
+    reasons.push(`AI 入库建议：${lastSaveRecommendation.reason}`);
+  }
+  if (lastQuestion) {
+    reasons.push(`触发兴趣的问题：${lastQuestion}`);
+  }
+  return reasons.join("\n\n");
 }
 
 async function sendInlineRequest<T>(message: RuntimeMessage): Promise<T> {
@@ -624,6 +679,7 @@ function buildShell(): string {
           <div class="secondary-actions">
             <button class="tool-button" type="button" data-action="save">保存</button>
             <button class="tool-button" type="button" data-action="retrieve">查库</button>
+            <button class="tool-button" type="button" data-action="promote">入库</button>
             <button class="tool-button" type="button" data-action="expand">展开</button>
           </div>
           <div class="primary-actions">

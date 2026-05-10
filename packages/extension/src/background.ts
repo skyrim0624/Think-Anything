@@ -1,5 +1,5 @@
 import type { PendingAction, RuntimeMessage } from "./messages.js";
-import { askTwyr, captureTwyr, loadSettings, retrieveTwyr } from "./api.js";
+import { askTwyr, captureTwyr, loadSettings, promoteSource, retrieveTwyr } from "./api.js";
 import { PENDING_ACTION_KEY } from "./messages.js";
 
 const MENU_IDS = {
@@ -87,6 +87,10 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     void handleInlineApi(() => retrieveTwyrFromStorage(message.body), sendResponse);
     return true;
   }
+  if (message.type === "TWYR_INLINE_PROMOTE_SOURCE") {
+    void handleInlineApi(() => promoteSourceFromStorage(message.body), sendResponse);
+    return true;
+  }
   if (message.type !== "TWYR_OPEN_PANEL" && message.type !== "TWYR_SELECTION_CAPTURED") return false;
   const tabId = sender.tab?.id;
   if (!tabId) return false;
@@ -110,6 +114,10 @@ async function captureTwyrFromStorage(body: Parameters<typeof captureTwyr>[1]): 
 
 async function retrieveTwyrFromStorage(body: Parameters<typeof retrieveTwyr>[1]): ReturnType<typeof retrieveTwyr> {
   return retrieveTwyr(await loadSettings(), body);
+}
+
+async function promoteSourceFromStorage(body: Parameters<typeof promoteSource>[1]): ReturnType<typeof promoteSource> {
+  return promoteSource(await loadSettings(), body);
 }
 
 async function handleInlineApi<T>(
