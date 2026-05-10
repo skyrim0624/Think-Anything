@@ -32,8 +32,8 @@ TWYR 的主体验不应继续停留在“选中文字后打开侧边栏”。新
 
 | 步骤 | 状态 | 目标 | 交付物 |
 | --- | --- | --- | --- |
-| 0 | 进行中 | 初始化 Git 仓库、绑定远端、写入本计划 | `docs/inline-codex-plan.md`，首次 commit/push |
-| 1 | 未开始 | 建立 Inline Bubble 消息协议和快捷键入口 | `Option+V` 打开原位输入框，`Option+S` 快速保存入口 |
+| 0 | 已完成 | 初始化 Git 仓库、绑定远端、写入本计划 | `docs/inline-codex-plan.md`，首次 commit/push |
+| 1 | 进行中 | 建立 Inline Bubble 消息协议和快捷键入口 | `Option+V` 打开原位输入框，`Option+S` 快速保存入口 |
 | 2 | 未开始 | 完成 Inline Bubble MVP | 选区旁输入、发送、回答、继续追问、关闭 |
 | 3 | 未开始 | 接入知识动作 | 保存、查旧笔记、展开工作台 |
 | 4 | 未开始 | 强化知识沉淀策略 | 保存问答链路、卡片元数据、检索理由展示 |
@@ -58,4 +58,4 @@ TWYR 的主体验不应继续停留在“选中文字后打开侧边栏”。新
 
 ## 提交记录
 
-- 待更新。
+- `e3d8d89`：初始化 TWYR Git 仓库，写入 Inline Codex 更新计划，并推送到 `https://github.com/skyrim0624/twyr`。
