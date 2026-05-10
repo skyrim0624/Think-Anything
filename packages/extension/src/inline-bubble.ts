@@ -42,7 +42,8 @@ let isBusy = false;
 
 export function openInlineBubble(options: InlineBubbleOptions): void {
   currentContext = options.captureContext();
-  messages = [{ role: "system", content: buildInitialCaptureMessage(currentContext) }];
+  logCaptureDetails(currentContext);
+  messages = [];
   lastQuestion = "";
   lastAnswer = "";
   lastThreadPath = "";
@@ -130,8 +131,6 @@ function bindEvents(options: InlineBubbleOptions): void {
 
 function renderBubble(options: InlineBubbleOptions): void {
   if (!shadow || !currentContext) return;
-  const title = shadow.querySelector<HTMLElement>("[data-role='title']");
-  const context = shadow.querySelector<HTMLElement>("[data-role='context']");
   const messageList = shadow.querySelector<HTMLElement>("[data-role='messages']");
   const sendButton = getButton("send");
   const saveButton = getButton("save");
@@ -139,14 +138,6 @@ function renderBubble(options: InlineBubbleOptions): void {
   const promoteButton = getButton("promote");
   const textarea = getTextarea();
 
-  if (title) title.textContent = currentContext.source.title || "当前页面";
-  if (context) {
-    const selectionLabel = currentContext.selectionText
-      ? `已选中 ${currentContext.selectionText.length} 字`
-      : "未选中文本";
-    const visualLabel = currentContext.visualAssets?.length ? ` · ${currentContext.visualAssets.length} 个画面` : "";
-    context.textContent = `${currentContext.source.site || location.hostname} · ${selectionLabel}${visualLabel}`;
-  }
   if (messageList) {
     messageList.innerHTML = messages
       .map((message) => {
@@ -156,6 +147,7 @@ function renderBubble(options: InlineBubbleOptions): void {
         </article>`;
       })
       .join("");
+    messageList.hidden = messages.length === 0;
     messageList.scrollTop = messageList.scrollHeight;
   }
   if (sendButton) sendButton.textContent = isBusy ? "处理中" : "发送";
@@ -257,12 +249,19 @@ function buildCapturePlan(context: ReadingContext): { level: CaptureLevel; cardT
   };
 }
 
-function buildInitialCaptureMessage(context: ReadingContext): string {
-  const parts: string[] = [];
-  if (context.selectionText) parts.push("当前选区");
-  if (context.visualAssets?.length) parts.push(`${context.visualAssets.length} 个图片/视频画面`);
-  if (!parts.length) return "未检测到选区，将使用当前页面作为上下文。";
-  return `已捕获${parts.join(" + ")}，可以直接提问。`;
+function logCaptureDetails(context: ReadingContext): void {
+  console.info("[Think] Inline context captured", {
+    title: context.source.title,
+    site: context.source.site,
+    selectionLength: context.selectionText?.length ?? 0,
+    visualAssets: context.visualAssets?.map((asset) => ({
+      id: asset.id,
+      type: asset.type,
+      label: asset.label,
+      sourceUrl: asset.sourceUrl,
+      rect: asset.rect,
+    })) ?? [],
+  });
 }
 
 function buildSaveButtonTitle(): string {
@@ -427,6 +426,7 @@ function buildShell(): string {
       }
 
       .bubble {
+        position: relative;
         overflow: hidden;
         border: 1px solid rgba(15, 23, 42, 0.14);
         border-radius: 8px;
@@ -437,52 +437,13 @@ function buildShell(): string {
         backdrop-filter: saturate(1.2) blur(14px);
       }
 
-      .header {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 10px;
-        padding: 12px 12px 8px;
-        border-bottom: 1px solid rgba(15, 23, 42, 0.08);
-      }
-
-      .brand {
-        font-size: 12px;
-        font-weight: 760;
-        color: #0f766e;
-        letter-spacing: 0;
-        line-height: 1.2;
-      }
-
-      .title {
-        margin-top: 3px;
-        max-width: 310px;
-        overflow: hidden;
-        color: #17202a;
-        font-size: 13px;
-        font-weight: 720;
-        line-height: 1.35;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .context {
-        margin-top: 2px;
-        color: #667085;
-        font-size: 12px;
-        line-height: 1.35;
-      }
-
       .close {
-        appearance: none;
-        width: 32px;
-        height: 32px;
-        border: 1px solid rgba(15, 23, 42, 0.1);
-        border-radius: 8px;
-        background: #ffffff;
+        min-width: 36px;
+        width: 36px;
+        padding: 7px 0;
         color: #667085;
-        cursor: pointer;
-        font: inherit;
+        font-size: 18px;
+        line-height: 1;
       }
 
       .messages {
@@ -490,7 +451,11 @@ function buildShell(): string {
         gap: 8px;
         max-height: 230px;
         overflow: auto;
-        padding: 10px 12px;
+        padding: 12px 12px 8px;
+      }
+
+      .messages[hidden] {
+        display: none;
       }
 
       .message {
@@ -532,8 +497,8 @@ function buildShell(): string {
       .composer {
         display: grid;
         gap: 8px;
-        padding: 10px 12px 12px;
-        border-top: 1px solid rgba(15, 23, 42, 0.08);
+        padding: 12px;
+        border-top: 0;
       }
 
       textarea {
@@ -627,19 +592,16 @@ function buildShell(): string {
           box-shadow: 0 16px 48px rgba(0, 0, 0, 0.34), 0 1px 2px rgba(0, 0, 0, 0.28);
         }
 
-        .header,
         .composer {
           border-color: rgba(226, 232, 240, 0.1);
         }
 
-        .title,
         .message-body,
         textarea,
         button {
           color: #f8fafc;
         }
 
-        .context,
         .message-role,
         .close {
           color: #a7b0bd;
@@ -662,10 +624,6 @@ function buildShell(): string {
           background: rgba(22, 101, 52, 0.22);
           border-color: rgba(74, 222, 128, 0.22);
         }
-
-        .brand {
-          color: #5eead4;
-        }
       }
 
       @media (prefers-reduced-motion: reduce) {
@@ -675,14 +633,6 @@ function buildShell(): string {
       }
     </style>
     <section class="bubble" role="dialog" aria-label="Think 原位对话框">
-      <header class="header">
-        <div>
-          <div class="brand">Think</div>
-          <div class="title" data-role="title"></div>
-          <div class="context" data-role="context"></div>
-        </div>
-        <button class="close" type="button" data-action="close" aria-label="关闭 Think 原位对话框">×</button>
-      </header>
       <div class="messages" data-role="messages" aria-live="polite"></div>
       <div class="composer">
         <textarea data-role="question" placeholder="${DEFAULT_QUESTION}"></textarea>
@@ -694,6 +644,7 @@ function buildShell(): string {
             <button class="tool-button" type="button" data-action="expand">展开</button>
           </div>
           <div class="primary-actions">
+            <button class="tool-button close" type="button" data-action="close" aria-label="关闭 Think 原位对话框">×</button>
             <button class="send-button" type="button" data-action="send">发送</button>
           </div>
         </div>
