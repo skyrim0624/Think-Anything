@@ -1,9 +1,9 @@
 {
-  "name": "twyr",
+  "name": "think-anything",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "TWYR: Thinking, when you are reading!",
+  "description": "Think Anything: call Codex from Chrome while reading, then save discussions into Obsidian.",
   "workspaces": [
     "packages/*"
   ],

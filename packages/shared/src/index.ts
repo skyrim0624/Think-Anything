@@ -1,8 +1,8 @@
 export const TWYR_NAME = "Think";
 export const TWYR_FULL_NAME = "Think · thinking anytime";
 export const DEFAULT_BRIDGE_URL = "http://127.0.0.1:47321";
-export const DEFAULT_VAULT_PATH = "/Users/andreas/cmi社区知识库/TWYR";
-export const DEFAULT_AGENT_MEMORY_PATH = "/Users/andreas/cmi社区知识库/CMI/Agent-Memory";
+export const DEFAULT_VAULT_PATH = "~/Documents/TWYR";
+export const DEFAULT_AGENT_MEMORY_PATH = "~/Documents/Agent-Memory";
 
 export type TwyrActionMode =
   | "explain"

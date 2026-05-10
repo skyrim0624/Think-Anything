@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { Codex } from "@openai/codex-sdk";
 import type { BridgeConfig } from "./config.js";
@@ -20,7 +20,15 @@ export class CodexAuthError extends Error {
 }
 
 export function isCodexCliAvailable(config: BridgeConfig): boolean {
-  return existsSync(config.codexCommand);
+  if (config.codexCommand.includes("/")) return existsSync(config.codexCommand);
+  const result = spawnSync(config.codexCommand, ["--version"], {
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      PATH: buildChildPath(config.codexCommand, process.env.PATH),
+    },
+  });
+  return !result.error;
 }
 
 export async function isCodexSdkAvailable(): Promise<boolean> {

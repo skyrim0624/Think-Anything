@@ -34,11 +34,11 @@ export function loadConfig(): BridgeConfig {
   const port = Number(process.env.TWYR_PORT ?? persisted.port ?? 47321);
   const host = process.env.TWYR_HOST ?? "127.0.0.1";
   const token = process.env.TWYR_BRIDGE_TOKEN ?? persisted.token ?? createToken();
-  const vaultPath = process.env.TWYR_VAULT_PATH ?? persisted.vaultPath ?? DEFAULT_VAULT_PATH;
-  const agentMemoryPath =
-    process.env.TWYR_AGENT_MEMORY_PATH ?? persisted.agentMemoryPath ?? DEFAULT_AGENT_MEMORY_PATH;
-  const codexCommand =
-    process.env.TWYR_CODEX_COMMAND ?? persisted.codexCommand ?? "/Users/andreas/.bun/bin/codex";
+  const vaultPath = expandHomePath(process.env.TWYR_VAULT_PATH ?? persisted.vaultPath ?? DEFAULT_VAULT_PATH);
+  const agentMemoryPath = expandHomePath(
+    process.env.TWYR_AGENT_MEMORY_PATH ?? persisted.agentMemoryPath ?? DEFAULT_AGENT_MEMORY_PATH,
+  );
+  const codexCommand = expandHomePath(process.env.TWYR_CODEX_COMMAND ?? persisted.codexCommand ?? "codex");
 
   if (!persisted.token && !process.env.TWYR_BRIDGE_TOKEN) {
     persistConfig({
@@ -79,4 +79,10 @@ function persistConfig(config: PersistedConfig): void {
 
 function createToken(): string {
   return `twyr_${randomBytes(24).toString("hex")}`;
+}
+
+function expandHomePath(value: string): string {
+  if (value === "~") return homedir();
+  if (value.startsWith("~/")) return join(homedir(), value.slice(2));
+  return value;
 }

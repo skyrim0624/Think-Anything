@@ -1,130 +1,224 @@
-# Think
+# Think Anything
 
-Think 是 TWYR 的 Chrome 插件显示名，表达的是“随时进入思考”。TWYR 仍作为项目代号、Bridge 环境变量和 Obsidian vault 名称保留。
+Think Anything 是一个 Chrome + Obsidian + Codex 阅读知识工作台。Chrome 负责捕获网页现场，本地 Bridge 负责调用 Codex、检索旧笔记和写入 Obsidian，Obsidian vault 负责长期保存。
 
-Think 是一个 Chrome + Obsidian + Codex 阅读知识工作台。Chrome 负责捕获阅读现场，本地 Bridge 负责调用 Codex、检索旧笔记和写入 Obsidian，TWYR vault 负责长期保存。
+Chrome 扩展的显示名是 `Think`。内部包名和部分环境变量仍保留 `TWYR`，来自项目原名 `Thinking, when you are reading!`。
 
-## 项目结构
+## 能做什么
 
-- `packages/shared`：Chrome 扩展和 Bridge 共用的数据类型。
-- `packages/bridge`：本地 Node 服务，只监听 `127.0.0.1`。
-- `packages/extension`：Manifest V3 Chrome 扩展，显示名为 Think，包含右键菜单、快捷键、Side Panel 和选区浮动工具条。
+- 在任意网页选中文字后按 `Option+S`，在选区附近打开原位 AI 对话框。
+- 在对话框里继续追问、查旧笔记、保存卡片、确认全文入库。
+- 选区附近有图片、视频或 canvas 时，自动截取当前可见画面并交给 Codex 看。
+- 右键图片或视频，点击 `Think：查看这张图片/视频`，直接基于画面讨论。
+- 按 `Option+V` 快速保存当前选区或视觉材料。
+- 长期知识沉淀到 Obsidian：临时收件箱、全文来源、问题卡、洞察卡、讨论线程、主题索引。
 
-## 本地启动
-
-```bash
-npm install
-npm run build
-npm run start:bridge
-```
-
-首次启动 Bridge 会创建 `~/.twyr/config.json`，里面有 Chrome 扩展需要填写的 `token`。
-
-当前机器已安装为 LaunchAgent，登录后会自动启动：
+## 架构
 
 ```text
-/Users/andreas/Library/LaunchAgents/com.andreas.twyr.bridge.plist
+packages/
+├── shared      # 扩展和 Bridge 共用类型
+├── bridge      # 本地 Node 服务，只监听 127.0.0.1
+└── extension   # Manifest V3 Chrome 扩展
 ```
 
-Bridge 日志位置：
+数据流：
 
 ```text
-/Users/andreas/Library/Logs/TWYR/bridge.out.log
-/Users/andreas/Library/Logs/TWYR/bridge.err.log
+Chrome 页面选区/图片/视频帧
+  -> Think Chrome Extension
+  -> 127.0.0.1 本地 Bridge
+  -> Codex SDK / Codex CLI
+  -> Obsidian Markdown vault
 ```
 
-## 安装 Chrome 扩展
+## 环境要求
 
-1. 打开 `chrome://extensions`。
-2. 开启开发者模式。
-3. 选择“加载已解压的扩展程序”。
-4. 选择 `packages/extension/dist`。
-5. 打开 Think 侧边栏，在设置里填写 `Bridge URL` 和 `token`。
+- macOS / Linux / Windows 均可开发，当前自动启动示例以 macOS 为主。
+- Node.js 18+
+- npm
+- Google Chrome 或 Chromium
+- Codex CLI 已登录
+- 一个 Obsidian vault 目录
 
-默认 Bridge URL：
-
-```text
-http://127.0.0.1:47321
-```
-
-当前 Chrome 已加载本地扩展：
-
-```text
-/Users/andreas/vibe coding/读书/twyr/packages/extension/dist
-```
-
-常用入口：
-
-- 选中文字后按 `Option+S`，会在选区附近打开 Think 原位对话框；输入问题后按 `Enter` 发送，`Shift+Enter` 换行，`Esc` 关闭。
-- 选区附近有图片、视频或 canvas 时，Think 会截取当前可见画面并作为视觉附件交给 Codex；X 这类 `blob:` 视频会以当前帧截图进入讨论。
-- 也可以右键图片或视频，点 `Think：查看这张图片/视频`，让 Codex 直接基于画面讨论。
-- 原位对话框里可以直接继续追问，也可以点 `保存`、`查库`、`入库`、`展开`。展开后会进入完整 Think 工作台。
-- `保存` 会按 AI 的保存建议写入卡片，并带上选区、问题、回答、对话链路和讨论线程反链。
-- `入库` 会二次确认后把当前页面全文写入 `10-SOURCES/`；AI 只能建议全文入库，不能自动跳过确认。
-- 选中文字后按 `Option+V`，会把当前选区快速保存到 Think 知识库。
-- `Option+S` 和 `Option+V` 同时有页面内兜底监听；即使 Chrome 没登记扩展快捷键，普通阅读页面也能触发，但在输入框、编辑器和 Think 自己的对话框内不会抢快捷键。
-- 默认选中文字不会弹出 Think 工具条，避免干扰复制、翻译、搜索等日常操作。
-- 需要持续阅读讨论某个页面时，右键页面或选区，点 `Think：本页开启选区工具条`。
-- 本页工具条开启后，选中文字会出现“问 / 反驳 / 旧笔记 / 保存 / 关”；点“关”会关闭本页工具条。
-- 临时只处理一次时，右键选中文字，直接使用 `Think：解释选中内容` 等菜单。
-- `Command+Shift+K` 打开讨论工作台。
-- `Think：本页开启选区工具条` 仍保留为右键菜单入口；如需快捷键，可在 `chrome://extensions/shortcuts` 自行绑定。
-
-更新扩展代码后，需要在 `chrome://extensions/?id=njgpgdjaikleamljclcnaclacglahjie` 对 Think 点一次刷新按钮，让 Chrome 重新加载 `packages/extension/dist`。
-
-## Codex 登录
-
-TWYR 不把 API key 放进 Chrome 扩展；AI 提问由本地 Bridge 调用 Codex CLI / Codex SDK。若面板显示“Codex 登录不可用”，说明 Chrome 捕获和 Obsidian 写入都正常，但本机 Codex 凭据失效。
-
-重新登录方式：
+安装或登录 Codex CLI：
 
 ```bash
 codex login --device-auth
 ```
 
-或者使用有效 API key：
+如果使用 API key：
 
 ```bash
 printenv OPENAI_API_KEY | codex login --with-api-key
 ```
 
-登录完成后重启 Bridge：
+## 安装
 
 ```bash
-launchctl bootout gui/$(id -u) /Users/andreas/Library/LaunchAgents/com.andreas.twyr.bridge.plist
-launchctl bootstrap gui/$(id -u) /Users/andreas/Library/LaunchAgents/com.andreas.twyr.bridge.plist
+git clone https://github.com/skyrim0624/Think-Anything.git
+cd Think-Anything
+npm install
+npm run build
 ```
 
-## Obsidian 仓库
+首次启动 Bridge：
 
-默认 TWYR 知识库位置：
+```bash
+npm run start:bridge
+```
+
+Bridge 会创建：
 
 ```text
-/Users/andreas/cmi社区知识库/TWYR
+~/.twyr/config.json
 ```
 
-目录含义：
+默认配置：
 
-- `00-INBOX/`：临时捕获。
-- `10-SOURCES/`：确认入库的全文原文。
-- `20-CARDS/`：问题卡、洞察卡、观点卡、反驳卡、术语卡、摘录卡。
-- `30-THREADS/`：围绕网页或主题的讨论。
-- `40-MOC/`：主题索引和阅读线索。
-- `90-SYSTEM/`：schema、模板、TWYR skill、SQLite 索引。
+```json
+{
+  "token": "twyr_...",
+  "vaultPath": "~/Documents/TWYR",
+  "agentMemoryPath": "~/Documents/Agent-Memory",
+  "codexCommand": "codex",
+  "port": 47321
+}
+```
+
+你可以直接编辑 `~/.twyr/config.json`，或用环境变量覆盖：
+
+```bash
+TWYR_VAULT_PATH="$HOME/Documents/TWYR" \
+TWYR_AGENT_MEMORY_PATH="$HOME/Documents/Agent-Memory" \
+TWYR_CODEX_COMMAND="codex" \
+npm run start:bridge
+```
+
+`agentMemoryPath` 可不存在；不存在时只是少一部分旧笔记检索，不影响当前网页问答和保存。
+
+## 加载 Chrome 扩展
+
+1. 打开 `chrome://extensions`。
+2. 开启右上角“开发者模式”。
+3. 点击“加载已解压的扩展程序”。
+4. 选择本仓库里的 `packages/extension/dist`。
+5. 点击 Chrome 工具栏里的 `Think` 图标，打开侧边栏设置。
+6. 填入：
+   - Bridge URL：`http://127.0.0.1:47321`
+   - Token：从 `~/.twyr/config.json` 复制 `token`
+
+更新代码后，重新运行：
+
+```bash
+npm run build
+```
+
+然后在 `chrome://extensions` 里点 Think 的刷新按钮。
+
+## 常用入口
+
+- `Option+S`：打开原位对话框。
+- `Option+V`：快速保存当前选区或视觉材料。
+- `Command+Shift+K`：打开完整讨论工作台。
+- 右键选中文字：解释、挑战观点、联系旧笔记、快速保存。
+- 右键图片或视频：查看这张图片/视频。
+- 右键页面：开启/关闭本页选区工具条，或建议全文入库。
+
+对话框内：
+
+- `Enter`：发送。
+- `Shift+Enter`：换行。
+- `Esc`：关闭。
+- `保存`：按 AI 建议写入卡片。
+- `查库`：强制联系旧笔记。
+- `入库`：二次确认后把全文保存到 `10-SOURCES/`。
+- `展开`：进入完整工作台。
+
+## Obsidian Vault 结构
+
+默认 vault 路径是 `~/Documents/TWYR`，可在 `~/.twyr/config.json` 里改。
+
+```text
+00-INBOX/          临时捕获和视觉附件
+00-INBOX/assets/   图片、视频当前帧、canvas 截图
+10-SOURCES/        用户确认后保存的全文原文
+20-CARDS/          问题卡、洞察卡、观点卡、反驳卡、术语卡、摘录卡
+30-THREADS/        围绕网页或主题的连续讨论
+40-MOC/            来源索引、主题索引、阅读线索
+90-SYSTEM/         schema、模板、skill、SQLite 索引
+```
 
 ## API
 
+除 `/api/status` 外，所有接口都需要 `x-twyr-token`。
+
 - `GET /api/status`：检查 Bridge、vault、索引、Codex 状态。
-- `POST /api/ask`：向 TWYR 提问。
-- `POST /api/capture`：保存片段或卡片。
+- `POST /api/ask`：向 Codex 提问。
+- `POST /api/capture`：保存片段、卡片或视觉材料。
 - `POST /api/retrieve`：手动查旧笔记。
 - `POST /api/promote-source`：确认后全文入库。
-
-除 `/api/status` 外，所有接口都需要 `x-twyr-token`。
 
 ## 安全边界
 
 - Bridge 只监听 `127.0.0.1`。
-- Chrome 扩展不保存 API key。
+- Chrome 扩展不保存 OpenAI API key。
+- Chrome 扩展只保存 Bridge URL 和本地 token。
 - 全文入库必须由用户确认。
-- Codex SDK 是主路径；如果 SDK 调用失败，Bridge 会用 `codex exec --sandbox read-only` 兜底。
+- 视觉输入默认是当前可见画面截图，不会绕过网站权限下载私有视频源。
+- Codex 默认在 vault 目录下以只读沙盒处理问答，写入由 Bridge 负责。
+
+## 开发命令
+
+```bash
+npm run check
+npm run build
+npm run start:bridge
+npm run build:extension
+```
+
+## macOS 后台启动示例
+
+把下面内容保存为 `~/Library/LaunchAgents/com.local.think-anything.bridge.plist`，把路径改成你的仓库路径：
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.local.think-anything.bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>npm</string>
+    <string>run</string>
+    <string>start:bridge</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/absolute/path/to/Think-Anything</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+</dict>
+</plist>
+```
+
+启动：
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.local.think-anything.bridge.plist
+```
+
+停止：
+
+```bash
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.local.think-anything.bridge.plist
+```
+
+## 当前限制
+
+- 视频理解目前是“当前帧截图”，不是自动看完整视频。
+- 截图式视觉素材库、设计偏好库、多帧视频采样、文件拖拽还在后续路线里。
+- Chrome 全局快捷键可能被系统或其他扩展占用，可在 `chrome://extensions/shortcuts` 手动调整。

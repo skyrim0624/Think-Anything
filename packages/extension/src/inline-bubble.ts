@@ -69,8 +69,8 @@ export async function quickSaveInlineSelection(options: InlineBubbleOptions): Pr
         cardType: context.selectionText ? "quote" : "insight",
         level: "card",
         reason: context.selectionText
-          ? "用户通过 Option+S 在阅读现场快速保存选区。"
-          : "用户通过 Option+S 在阅读现场快速保存视觉材料。",
+          ? "用户通过 Option+V 在阅读现场快速保存选区。"
+          : "用户通过 Option+V 在阅读现场快速保存视觉材料。",
       },
     });
     options.showToast("Think：选区已保存");
