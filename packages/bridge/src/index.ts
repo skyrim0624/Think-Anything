@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { loadConfig } from "./config.js";
 import { isCodexAuthError, isCodexCliAvailable, isCodexSdkAvailable, runCodexPrompt } from "./codex-client.js";
+import { DreamService } from "./dream.js";
+import { HarnessService } from "./harness.js";
 import { buildAskPrompt, parseModelAnswer } from "./prompt.js";
 import { RetrievalService } from "./retrieval.js";
 import { VaultService } from "./vault.js";
@@ -9,6 +11,8 @@ import type {
   AskRequest,
   AskResponse,
   CaptureRequest,
+  DreamProposeRequest,
+  FeedbackRequest,
   PromoteSourceRequest,
   RetrieveRequest,
 } from "@twyr/shared";
@@ -16,8 +20,11 @@ import type {
 const config = loadConfig();
 const vault = new VaultService(config);
 vault.ensureStructure();
+const harness = new HarnessService(config);
+harness.ensureStructure();
 const retrieval = new RetrievalService(config);
 retrieval.refreshIndex(true);
+const dream = new DreamService(config, retrieval);
 
 const server = createServer(async (request, response) => {
   setCorsHeaders(request, response);
@@ -44,14 +51,24 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/capture") {
+      const startedAt = Date.now();
       const body = await readJson<CaptureRequest>(request);
       const prepared = prepareVisualContext(body.context, config);
       const result = vault.writeCard({ ...body, context: prepared.context });
       retrieval.refreshIndex(true);
-      sendJson(response, 200, result);
+      const trace = harness.writeTrace({
+        action: "capture",
+        context: prepared.context,
+        question: body.question ?? body.note,
+        resultPath: result.path,
+        result: { level: result.level, cardType: result.cardType },
+        durationMs: Date.now() - startedAt,
+      });
+      sendJson(response, 200, { ...result, traceId: trace.traceId });
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/retrieve") {
+      const startedAt = Date.now();
       const body = await readJson<RetrieveRequest>(request);
       const decision = retrieval.decideAndSearch({
         context: body.context,
@@ -59,15 +76,54 @@ const server = createServer(async (request, response) => {
         force: body.force,
         limit: body.limit,
       });
-      sendJson(response, 200, { retrieval: decision });
+      const trace = harness.writeTrace({
+        action: "retrieve",
+        context: body.context,
+        question: body.query,
+        retrieval: decision,
+        durationMs: Date.now() - startedAt,
+      });
+      sendJson(response, 200, { retrieval: decision, traceId: trace.traceId });
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/promote-source") {
+      const startedAt = Date.now();
       const body = await readJson<PromoteSourceRequest>(request);
       const prepared = prepareVisualContext(body.context, config);
       const result = vault.promoteSource({ ...body, context: prepared.context });
       retrieval.refreshIndex(true);
+      const trace = harness.writeTrace({
+        action: "promote-source",
+        context: prepared.context,
+        question: body.reason ?? body.summary,
+        resultPath: result.sourcePath,
+        result: { mocPath: result.mocPath },
+        durationMs: Date.now() - startedAt,
+      });
+      sendJson(response, 200, { ...result, traceId: trace.traceId });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/feedback") {
+      const body = await readJson<FeedbackRequest>(request);
+      const result = harness.appendFeedback(body);
       sendJson(response, 200, result);
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/dream/propose") {
+      const startedAt = Date.now();
+      const body = await readJson<DreamProposeRequest>(request);
+      const result = await dream.propose(body);
+      const trace = harness.writeTrace({
+        action: "dream-propose",
+        resultPath: result.proposalPath,
+        result: {
+          dreamRunId: result.dreamRunId,
+          suggestionCount: result.suggestionCount,
+          candidateCount: result.candidateCount,
+        },
+        durationMs: Date.now() - startedAt,
+      });
+      sendJson(response, 200, { ...result, traceId: trace.traceId });
       return;
     }
 
@@ -94,6 +150,7 @@ async function handleStatus(request: IncomingMessage, response: ServerResponse):
     vaultPath: config.vaultPath,
     vaultExists: vault.getStatus().vaultExists,
     indexReady: retrieval.indexReady,
+    harnessReady: true,
     codexSdkAvailable: await isCodexSdkAvailable(),
     codexCliPath: isCodexCliAvailable(config) ? config.codexCommand : undefined,
     message: "Think Anytime Bridge 可用。",
@@ -101,6 +158,7 @@ async function handleStatus(request: IncomingMessage, response: ServerResponse):
 }
 
 async function handleAsk(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const startedAt = Date.now();
   const body = await readJson<AskRequest>(request);
   const prepared = prepareVisualContext(body.context, config);
   const mode = body.mode ?? "freeform";
@@ -122,6 +180,15 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
     output = await runCodexPrompt(prompt, config, prepared.assets);
   } catch (error) {
     if (isCodexAuthError(error)) {
+      harness.writeTrace({
+        action: "ask",
+        context: prepared.context,
+        question: body.question,
+        mode,
+        retrieval: decision,
+        error: "Codex 登录不可用",
+        durationMs: Date.now() - startedAt,
+      });
       sendJson(response, 503, {
         error: "Codex 登录不可用",
         detail:
@@ -140,12 +207,25 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
     recommendation: parsed.saveRecommendation,
   });
   retrieval.refreshIndex(true);
+  const trace = harness.writeTrace({
+    action: "ask",
+    context: prepared.context,
+    question: body.question,
+    mode,
+    retrieval: decision,
+    saveRecommendation: parsed.saveRecommendation,
+    answer: parsed.answer,
+    resultPath: threadPath,
+    result: { runtime: output.runtime },
+    durationMs: Date.now() - startedAt,
+  });
   const result: AskResponse = {
     answer: parsed.answer,
     mode,
     retrieval: decision,
     saveRecommendation: parsed.saveRecommendation,
     threadPath,
+    traceId: trace.traceId,
     rawModelOutput: parsed.rawModelOutput,
   };
   sendJson(response, 200, result);

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node
 import { dirname, join, relative } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
+  DreamRelationSuggestion,
   ReadingContext,
   RetrievedNote,
   RetrievalDecision,
@@ -10,7 +11,7 @@ import type {
 import type { BridgeConfig } from "./config.js";
 import { extractTitle, trimText } from "./markdown.js";
 
-interface IndexedNote {
+export interface IndexedNote {
   path: string;
   root: "twyr" | "agentMemory";
   title: string;
@@ -53,6 +54,7 @@ export class RetrievalService {
       CREATE INDEX IF NOT EXISTS idx_notes_root ON notes(root);
     `);
     this.ensureIndexColumns();
+    this.ensureGraphTables();
   }
 
   get indexReady(): boolean {
@@ -139,6 +141,119 @@ export class RetrievalService {
       .slice(0, limit);
   }
 
+  listDreamCandidateNotes(params: { sinceDays?: number; limit?: number } = {}): IndexedNote[] {
+    this.refreshIndex();
+    const sinceMs = params.sinceDays ? Date.now() - params.sinceDays * 24 * 60 * 60 * 1000 : 0;
+    const rows = this.db
+      .prepare(
+        `
+        SELECT path, root, title, summary, topics, body, updatedAt
+        FROM notes
+        WHERE root = 'twyr'
+          AND updatedAt >= ?
+          AND (
+            path LIKE '20-CARDS/%'
+            OR path LIKE '10-SOURCES/%'
+            OR path LIKE '30-THREADS/%'
+          )
+        ORDER BY updatedAt DESC
+        LIMIT ?
+      `,
+      )
+      .all(sinceMs, params.limit ?? 24) as unknown as IndexedNote[];
+    return rows;
+  }
+
+  findSimilarNotes(note: IndexedNote, limit = 5): RetrievedNote[] {
+    const context: ReadingContext = {
+      source: {
+        url: `obsidian://${note.path}`,
+        title: note.title,
+        site: note.root,
+      },
+      selectionText: note.summary || note.title,
+      surroundingText: trimText(note.body, 2400),
+      headings: [note.title],
+      capturedAt: new Date().toISOString(),
+    };
+    return this.search([note.title, note.summary, note.body.slice(0, 1400)].join("\n"), context, limit + 4)
+      .filter((candidate) => candidate.root === "twyr")
+      .filter((candidate) => candidate.path !== note.path)
+      .filter((candidate) => !candidate.path.startsWith("90-SYSTEM/"))
+      .slice(0, limit);
+  }
+
+  recordDreamRun(params: {
+    id: string;
+    status: "running" | "completed" | "failed";
+    inputSince?: string;
+    proposalPath?: string;
+    suggestionCount?: number;
+    error?: string;
+  }): void {
+    this.db
+      .prepare(
+        `
+        INSERT INTO dream_runs (id, createdAt, status, inputSince, proposalPath, suggestionCount, error)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          status=excluded.status,
+          inputSince=excluded.inputSince,
+          proposalPath=excluded.proposalPath,
+          suggestionCount=excluded.suggestionCount,
+          error=excluded.error
+      `,
+      )
+      .run(
+        params.id,
+        Date.now(),
+        params.status,
+        params.inputSince ?? "",
+        params.proposalPath ?? "",
+        params.suggestionCount ?? 0,
+        params.error ?? "",
+      );
+  }
+
+  recordProposedEdges(dreamRunId: string, suggestions: DreamRelationSuggestion[]): void {
+    const insert = this.db.prepare(`
+      INSERT INTO note_edges (
+        id, sourcePath, targetPath, relation, confidence, evidence, reason, possibleWrong, status, dreamRunId, updatedAt
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        relation=excluded.relation,
+        confidence=excluded.confidence,
+        evidence=excluded.evidence,
+        reason=excluded.reason,
+        possibleWrong=excluded.possibleWrong,
+        status='proposed',
+        dreamRunId=excluded.dreamRunId,
+        updatedAt=excluded.updatedAt
+    `);
+    this.db.exec("BEGIN");
+    try {
+      for (const suggestion of suggestions) {
+        insert.run(
+          suggestion.id,
+          suggestion.sourcePath,
+          suggestion.targetPath,
+          suggestion.relation,
+          suggestion.confidence,
+          suggestion.evidence,
+          suggestion.reason,
+          suggestion.possibleWrong,
+          dreamRunId,
+          Date.now(),
+        );
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   private scanRoot(rootPath: string, root: "twyr" | "agentMemory"): IndexedNote[] {
     if (!existsSync(rootPath)) return [];
     const files = listMarkdownFiles(rootPath);
@@ -167,6 +282,48 @@ export class RetrievalService {
     if (!columns.has("topics")) {
       this.db.exec("ALTER TABLE notes ADD COLUMN topics TEXT NOT NULL DEFAULT ''");
     }
+  }
+
+  private ensureGraphTables(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS note_edges (
+        id TEXT PRIMARY KEY,
+        sourcePath TEXT NOT NULL,
+        targetPath TEXT NOT NULL,
+        relation TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        evidence TEXT NOT NULL DEFAULT '',
+        reason TEXT NOT NULL DEFAULT '',
+        possibleWrong TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'proposed',
+        dreamRunId TEXT NOT NULL DEFAULT '',
+        updatedAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_note_edges_source ON note_edges(sourcePath);
+      CREATE INDEX IF NOT EXISTS idx_note_edges_target ON note_edges(targetPath);
+      CREATE INDEX IF NOT EXISTS idx_note_edges_status ON note_edges(status);
+
+      CREATE TABLE IF NOT EXISTS dream_runs (
+        id TEXT PRIMARY KEY,
+        createdAt INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        inputSince TEXT NOT NULL DEFAULT '',
+        proposalPath TEXT NOT NULL DEFAULT '',
+        suggestionCount INTEGER NOT NULL DEFAULT 0,
+        error TEXT NOT NULL DEFAULT ''
+      );
+
+      CREATE TABLE IF NOT EXISTS topic_aliases (
+        id TEXT PRIMARY KEY,
+        canonicalTopic TEXT NOT NULL,
+        alias TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'proposed',
+        dreamRunId TEXT NOT NULL DEFAULT '',
+        reason TEXT NOT NULL DEFAULT '',
+        updatedAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_topic_aliases_canonical ON topic_aliases(canonicalTopic);
+    `);
   }
 }
 

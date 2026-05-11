@@ -11,6 +11,7 @@
     "build": "npm run build -w @twyr/shared && npm run build -w @twyr/bridge && npm run build -w @twyr/extension",
     "check": "npm run build -w @twyr/shared && npm run check -w @twyr/bridge && npm run check -w @twyr/extension",
     "dev:bridge": "npm run dev -w @twyr/bridge",
+    "eval:harness": "npm run eval:harness -w @twyr/bridge",
     "start:bridge": "npm run start -w @twyr/bridge",
     "build:extension": "npm run build -w @twyr/extension"
   },

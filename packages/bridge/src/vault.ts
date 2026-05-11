@@ -22,6 +22,11 @@ const DIRECTORIES = [
   "30-THREADS",
   "40-MOC",
   "90-SYSTEM",
+  "90-SYSTEM/dreams",
+  "90-SYSTEM/harness",
+  "90-SYSTEM/harness/datasets",
+  "90-SYSTEM/harness/eval-runs",
+  "90-SYSTEM/harness/traces",
   "90-SYSTEM/templates",
   "90-SYSTEM/skills",
 ];

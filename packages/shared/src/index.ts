@@ -121,6 +121,7 @@ export interface AskResponse {
   retrieval: RetrievalDecision;
   saveRecommendation: SaveRecommendation;
   threadPath: string;
+  traceId?: string;
   rawModelOutput?: string;
 }
 
@@ -140,6 +141,7 @@ export interface CaptureResponse {
   path: string;
   level: CaptureLevel;
   cardType: TwyrCardType;
+  traceId?: string;
 }
 
 export interface RetrieveRequest {
@@ -151,6 +153,71 @@ export interface RetrieveRequest {
 
 export interface RetrieveResponse {
   retrieval: RetrievalDecision;
+  traceId?: string;
+}
+
+export type FeedbackTargetType =
+  | "answer"
+  | "retrieval"
+  | "saveRecommendation"
+  | "dreamEdge"
+  | "dreamProposal";
+
+export type FeedbackRating =
+  | "useful"
+  | "notUseful"
+  | "accepted"
+  | "rejected"
+  | "irrelevant"
+  | "missed";
+
+export interface FeedbackRequest {
+  targetType: FeedbackTargetType;
+  rating: FeedbackRating;
+  traceId?: string;
+  targetId?: string;
+  reason?: string;
+  sourceUrl?: string;
+  sourceTitle?: string;
+}
+
+export interface FeedbackResponse {
+  feedbackId: string;
+  path: string;
+  traceId?: string;
+}
+
+export type DreamRelationType =
+  | "same-topic"
+  | "extends"
+  | "contradicts"
+  | "example-of"
+  | "method-for"
+  | "design-preference"
+  | "question-raised-by";
+
+export interface DreamProposeRequest {
+  sinceDays?: number;
+  limit?: number;
+}
+
+export interface DreamRelationSuggestion {
+  id: string;
+  sourcePath: string;
+  targetPath: string;
+  relation: DreamRelationType;
+  confidence: number;
+  evidence: string;
+  reason: string;
+  possibleWrong: string;
+}
+
+export interface DreamProposeResponse {
+  dreamRunId: string;
+  proposalPath: string;
+  suggestionCount: number;
+  candidateCount: number;
+  traceId?: string;
 }
 
 export interface PromoteSourceRequest {
@@ -164,6 +231,7 @@ export interface PromoteSourceRequest {
 export interface PromoteSourceResponse {
   sourcePath: string;
   mocPath: string;
+  traceId?: string;
 }
 
 export interface ApiStatus {
