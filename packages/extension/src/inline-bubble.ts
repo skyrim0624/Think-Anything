@@ -38,7 +38,9 @@ let lastQuestion = "";
 let lastAnswer = "";
 let lastThreadPath = "";
 let lastSaveRecommendation: SaveRecommendation | undefined;
+let lastSavedAt = 0;
 let isBusy = false;
+let activeRequestId = 0;
 
 export function openInlineBubble(options: InlineBubbleOptions): void {
   currentContext = options.captureContext();
@@ -48,7 +50,9 @@ export function openInlineBubble(options: InlineBubbleOptions): void {
   lastAnswer = "";
   lastThreadPath = "";
   lastSaveRecommendation = undefined;
+  lastSavedAt = 0;
   isBusy = false;
+  activeRequestId += 1;
   ensureBubble(options);
   positionBubble();
   renderBubble(options);
@@ -90,7 +94,9 @@ export function closeInlineBubble(): void {
   lastAnswer = "";
   lastThreadPath = "";
   lastSaveRecommendation = undefined;
+  lastSavedAt = 0;
   isBusy = false;
+  activeRequestId += 1;
 }
 
 function ensureBubble(options: InlineBubbleOptions): void {
@@ -121,7 +127,14 @@ function bindEvents(options: InlineBubbleOptions): void {
       void sendQuestion(options);
     }
   });
-  getButton("send")?.addEventListener("click", () => void sendQuestion(options));
+  getButton("send")?.addEventListener("click", () => {
+    if (isBusy) {
+      stopActiveRequest(options);
+      return;
+    }
+    void sendQuestion(options);
+  });
+  getButton("retry")?.addEventListener("click", () => void retryLastQuestion(options));
   getButton("save")?.addEventListener("click", () => void saveCurrentThread(options));
   getButton("retrieve")?.addEventListener("click", () => void retrieveRelatedNotes(options));
   getButton("promote")?.addEventListener("click", () => void promoteCurrentSource(options));
@@ -136,12 +149,14 @@ function renderBubble(options: InlineBubbleOptions): void {
   const saveButton = getButton("save");
   const retrieveButton = getButton("retrieve");
   const promoteButton = getButton("promote");
+  const retryButton = getButton("retry");
   const textarea = getTextarea();
 
   if (messageList) {
     messageList.innerHTML = messages
       .map((message) => {
-        return `<article class="message message-${message.role}">
+        const longClass = message.role === "assistant" && message.content.length > 1200 ? " message-long" : "";
+        return `<article class="message message-${message.role}${longClass}">
           <div class="message-role">${roleLabel(message.role)}</div>
           <div class="message-body">${escapeHtml(message.content)}</div>
         </article>`;
@@ -150,24 +165,29 @@ function renderBubble(options: InlineBubbleOptions): void {
     messageList.hidden = messages.length === 0;
     messageList.scrollTop = messageList.scrollHeight;
   }
-  if (sendButton) sendButton.textContent = isBusy ? "处理中" : "发送";
-  if (sendButton) sendButton.toggleAttribute("disabled", isBusy);
+  if (sendButton) sendButton.textContent = isBusy ? "停止" : "发送";
+  if (sendButton) sendButton.toggleAttribute("disabled", !currentContext);
+  if (saveButton) saveButton.textContent = Date.now() - lastSavedAt < 1600 ? "已保存" : "保存";
   if (saveButton) saveButton.toggleAttribute("disabled", isBusy || !currentContext);
   if (saveButton) saveButton.title = buildSaveButtonTitle();
   if (retrieveButton) retrieveButton.toggleAttribute("disabled", isBusy || !currentContext);
   if (promoteButton) promoteButton.toggleAttribute("disabled", isBusy || !currentContext);
   if (promoteButton) promoteButton.title = "确认后将当前页面全文写入 Think Anytime 长期资料库";
+  if (retryButton) retryButton.hidden = !lastQuestion;
+  if (retryButton) retryButton.toggleAttribute("disabled", isBusy || !lastQuestion);
   if (textarea && !textarea.value.trim() && !lastQuestion) textarea.placeholder = DEFAULT_QUESTION;
 
   positionBubble();
 }
 
-async function sendQuestion(options: InlineBubbleOptions): Promise<void> {
+async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: string): Promise<void> {
   const textarea = getTextarea();
-  const question = textarea?.value.trim() || DEFAULT_QUESTION;
+  const question = overrideQuestion?.trim() || textarea?.value.trim() || DEFAULT_QUESTION;
   if (!currentContext || isBusy || !question) return;
 
   const conversation = buildConversationHistory();
+  const requestId = activeRequestId + 1;
+  activeRequestId = requestId;
   lastQuestion = question;
   messages.push({ role: "user", content: question });
   if (textarea) textarea.value = "";
@@ -184,17 +204,35 @@ async function sendQuestion(options: InlineBubbleOptions): Promise<void> {
         conversation,
       },
     });
+    if (requestId !== activeRequestId) return;
     lastAnswer = response.answer;
     lastThreadPath = response.threadPath;
     lastSaveRecommendation = response.saveRecommendation;
     messages.push({ role: "assistant", content: response.answer });
   } catch (error) {
+    if (requestId !== activeRequestId) return;
     messages.push({ role: "system", content: error instanceof Error ? error.message : String(error) });
   } finally {
-    isBusy = false;
-    renderBubble(options);
-    textarea?.focus();
+    if (requestId === activeRequestId) {
+      isBusy = false;
+      renderBubble(options);
+      textarea?.focus();
+    }
   }
+}
+
+function stopActiveRequest(options: InlineBubbleOptions): void {
+  if (!isBusy) return;
+  activeRequestId += 1;
+  isBusy = false;
+  messages.push({ role: "system", content: "已停止等待；如果原请求稍后返回，本窗口会忽略那次结果。" });
+  renderBubble(options);
+  getTextarea()?.focus();
+}
+
+async function retryLastQuestion(options: InlineBubbleOptions): Promise<void> {
+  if (!lastQuestion || isBusy) return;
+  await sendQuestion(options, lastQuestion);
 }
 
 async function saveCurrentThread(options: InlineBubbleOptions): Promise<void> {
@@ -216,7 +254,9 @@ async function saveCurrentThread(options: InlineBubbleOptions): Promise<void> {
         reason: capturePlan.reason,
       },
     });
+    lastSavedAt = Date.now();
     messages.push({ role: "system", content: `已保存为 ${response.level}/${response.cardType}：${response.path}` });
+    window.setTimeout(() => renderBubble(options), 1700);
   } catch (error) {
     messages.push({ role: "system", content: error instanceof Error ? error.message : String(error) });
   } finally {
@@ -497,6 +537,12 @@ function buildShell(): string {
         line-height: 1.6;
       }
 
+      .message-long .message-body {
+        max-height: 180px;
+        overflow: auto;
+        padding-right: 4px;
+      }
+
       .composer {
         display: grid;
         gap: 8px;
@@ -533,6 +579,7 @@ function buildShell(): string {
 
       .actions {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
@@ -543,6 +590,14 @@ function buildShell(): string {
         display: flex;
         align-items: center;
         gap: 6px;
+      }
+
+      button[hidden] {
+        display: none;
+      }
+
+      .primary-actions {
+        margin-left: auto;
       }
 
       button {
@@ -666,6 +721,7 @@ function buildShell(): string {
             <button class="tool-button" type="button" data-action="expand">展开</button>
           </div>
           <div class="primary-actions">
+            <button class="tool-button" type="button" data-action="retry" hidden>重试</button>
             <button class="tool-button close" type="button" data-action="close" aria-label="关闭 Think Anytime 原位对话框">×</button>
             <button class="send-button" type="button" data-action="send">发送</button>
           </div>
