@@ -183,7 +183,7 @@ function App(): React.ReactElement {
 
   async function runPromote(): Promise<void> {
     if (!context || isBusy) return;
-    const confirmed = window.confirm("确认把当前网页全文保存到 Think 的 10-SOURCES 吗？");
+    const confirmed = window.confirm("确认把当前网页全文保存到 Think Anytime 的 10-SOURCES 吗？");
     if (!confirmed) return;
     setIsBusy(true);
     try {
@@ -212,14 +212,14 @@ function App(): React.ReactElement {
     <main className="app-shell">
       <header className="header">
         <div>
-          <div className="brand">Think</div>
-          <div className="subtitle">thinking anytime</div>
+          <div className="brand">Think Anytime</div>
+          <div className="subtitle">reading notes in motion</div>
         </div>
         <button
           className="icon-button"
           type="button"
           title="设置"
-          aria-label="打开 Think 设置"
+          aria-label="打开 Think Anytime 设置"
           onClick={() => setShowSettings((value) => !value)}
         >
           <Settings size={18} />

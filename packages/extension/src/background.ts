@@ -241,42 +241,42 @@ async function setupContextMenus(): Promise<void> {
   await chrome.contextMenus.removeAll();
   await chrome.contextMenus.create({
     id: MENU_IDS.enableToolbar,
-    title: "Think：本页开启选区工具条",
+    title: "Think Anytime：本页开启选区工具条",
     contexts: ["page", "selection"],
   });
   await chrome.contextMenus.create({
     id: MENU_IDS.disableToolbar,
-    title: "Think：本页关闭选区工具条",
+    title: "Think Anytime：本页关闭选区工具条",
     contexts: ["page", "selection"],
   });
   await chrome.contextMenus.create({
     id: MENU_IDS.explain,
-    title: "Think：解释选中内容",
+    title: "Think Anytime：解释选中内容",
     contexts: ["selection"],
   });
   await chrome.contextMenus.create({
     id: MENU_IDS.visual,
-    title: "Think：查看这张图片/视频",
+    title: "Think Anytime：查看这张图片/视频",
     contexts: ["image", "video"],
   });
   await chrome.contextMenus.create({
     id: MENU_IDS.challenge,
-    title: "Think：挑战这个观点",
+    title: "Think Anytime：挑战这个观点",
     contexts: ["selection"],
   });
   await chrome.contextMenus.create({
     id: MENU_IDS.connect,
-    title: "Think：联系旧笔记",
+    title: "Think Anytime：联系旧笔记",
     contexts: ["selection", "page"],
   });
   await chrome.contextMenus.create({
     id: MENU_IDS.capture,
-    title: "Think：快速保存",
+    title: "Think Anytime：快速保存",
     contexts: ["selection", "page"],
   });
   await chrome.contextMenus.create({
     id: MENU_IDS.promote,
-    title: "Think：建议全文入库",
+    title: "Think Anytime：建议全文入库",
     contexts: ["page", "selection"],
   });
 }
@@ -424,7 +424,7 @@ async function openOrReuseStandaloneWindow(url: string): Promise<void> {
     focused: true,
   });
   if (!createdWindow?.id) {
-    throw new Error("Think 小窗口创建失败");
+    throw new Error("Think Anytime 小窗口创建失败");
   }
   standaloneWindowId = createdWindow.id;
 }

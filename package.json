@@ -1,9 +1,9 @@
 {
-  "name": "think-anything",
+  "name": "think-anytime",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Think Anything: call Codex from Chrome while reading, then save discussions into Obsidian.",
+  "description": "Think Anytime: call Codex from Chrome while reading, then save discussions into Obsidian.",
   "workspaces": [
     "packages/*"
   ],

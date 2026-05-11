@@ -1,15 +1,15 @@
-# Think Anything
+# Think Anytime
 
-Think Anything 是一个 Chrome + Obsidian + Codex 阅读知识工作台。Chrome 负责捕获网页现场，本地 Bridge 负责调用 Codex、检索旧笔记和写入 Obsidian，Obsidian vault 负责长期保存。
+Think Anytime 是一个 Chrome + Obsidian + Codex 阅读知识工作台。Chrome 负责捕获网页现场，本地 Bridge 负责调用 Codex、检索旧笔记和写入 Obsidian，Obsidian vault 负责长期保存。
 
-Chrome 扩展的显示名是 `Think`。内部包名和部分环境变量仍保留 `TWYR`，来自项目原名 `Thinking, when you are reading!`。
+Chrome 扩展的显示名是 `Think Anytime`。代码仓库地址仍是历史名称 `Think-Anything`；内部包名和部分环境变量仍保留 `TWYR`，来自项目原名 `Thinking, when you are reading!`。
 
 ## 能做什么
 
 - 在任意网页选中文字后按 `Option+S`，在选区附近打开原位 AI 对话框。
 - 在对话框里继续追问、查旧笔记、保存卡片、确认全文入库。
 - 选区附近有图片、视频或 canvas 时，自动截取当前可见画面并交给 Codex 看。
-- 右键图片或视频，点击 `Think：查看这张图片/视频`，直接基于画面讨论。
+- 右键图片或视频，点击 `Think Anytime：查看这张图片/视频`，直接基于画面讨论。
 - 按 `Option+V` 快速保存当前选区或视觉材料。
 - 长期知识沉淀到 Obsidian：临时收件箱、全文来源、问题卡、洞察卡、讨论线程、主题索引。
 
@@ -26,7 +26,7 @@ packages/
 
 ```text
 Chrome 页面选区/图片/视频帧
-  -> Think Chrome Extension
+  -> Think Anytime Chrome Extension
   -> 127.0.0.1 本地 Bridge
   -> Codex SDK / Codex CLI
   -> Obsidian Markdown vault
@@ -105,7 +105,7 @@ npm run start:bridge
 2. 开启右上角“开发者模式”。
 3. 点击“加载已解压的扩展程序”。
 4. 选择本仓库里的 `packages/extension/dist`。
-5. 点击 Chrome 工具栏里的 `Think` 图标，打开侧边栏设置。
+5. 点击 Chrome 工具栏里的 `Think Anytime` 图标，打开侧边栏设置。
 6. 填入：
    - Bridge URL：`http://127.0.0.1:47321`
    - Token：从 `~/.twyr/config.json` 复制 `token`
@@ -116,7 +116,7 @@ npm run start:bridge
 npm run build
 ```
 
-然后在 `chrome://extensions` 里点 Think 的刷新按钮。
+然后在 `chrome://extensions` 里点 Think Anytime 的刷新按钮。
 
 ## 常用入口
 

@@ -35,7 +35,7 @@ export class VaultService {
       mkdirSync(join(this.config.vaultPath, directory), { recursive: true });
     }
     this.ensureFile("README.md", buildVaultReadme());
-    this.ensureFile("40-MOC/阅读线索.md", "# 阅读线索\n\nTWYR 会在这里汇总值得长期追踪的主题线索。\n");
+    this.ensureFile("40-MOC/阅读线索.md", "# 阅读线索\n\nThink Anytime 会在这里汇总值得长期追踪的主题线索。\n");
     this.ensureFile("90-SYSTEM/schema.md", buildSchemaDoc());
     this.ensureFile("90-SYSTEM/skills/twyr-retrieval-skill.md", buildRetrievalSkill());
     this.ensureFile("90-SYSTEM/templates/card-template.md", buildCardTemplate());
@@ -71,7 +71,7 @@ export class VaultService {
       params.context.visualAssets?.length
         ? ["**视觉附件**", "", formatVisualAssets(params.context.visualAssets), ""].join("\n")
         : "",
-      "**TWYR 回答**",
+      "**Think Anytime 回答**",
       "",
       params.answer,
       "",
@@ -209,7 +209,7 @@ function buildCardMarkdown(request: CaptureRequest, level: CaptureLevel, cardTyp
       ? ["## 视觉附件", "", formatVisualAssets(request.context.visualAssets), ""].join("\n")
       : "",
     request.question ? ["## 问题", "", request.question, ""].join("\n") : "",
-    request.answer ? ["## TWYR 回答", "", request.answer, ""].join("\n") : "",
+    request.answer ? ["## Think Anytime 回答", "", request.answer, ""].join("\n") : "",
     request.conversation && request.conversation.length > 2
       ? ["## 完整对话链路", "", formatConversation(request.conversation), ""].join("\n")
       : "",
@@ -245,7 +245,7 @@ function formatConversation(conversation: CaptureRequest["conversation"]): strin
     .filter((message) => message.content.trim())
     .slice(-12)
     .map((message) => {
-      const role = message.role === "assistant" ? "TWYR" : "用户";
+      const role = message.role === "assistant" ? "Think Anytime" : "用户";
       return [`### ${role}`, "", trimText(message.content, 2000)].join("\n");
     })
     .join("\n\n");
@@ -272,7 +272,7 @@ function buildSourceMarkdown(request: PromoteSourceRequest): string {
     "",
     "## 为什么入库",
     "",
-    request.reason ?? "用户确认这篇材料值得进入 TWYR 长期知识库。",
+    request.reason ?? "用户确认这篇材料值得进入 Think Anytime 长期知识库。",
     "",
     "## 摘要",
     "",
@@ -294,9 +294,9 @@ function buildSourceMarkdown(request: PromoteSourceRequest): string {
 
 function buildVaultReadme(): string {
   return [
-    "# TWYR",
+    "# Think Anytime",
     "",
-    "TWYR = Thinking, when you are reading!",
+    "Think Anytime = 随时在阅读现场思考、讨论和沉淀。",
     "",
     "这是浏览器阅读现场的 AI 思考与知识沉淀仓库。Chrome 负责捕获现场，Codex 负责解释、讨论和整理，Obsidian 负责长期保存。",
     "",
@@ -307,14 +307,14 @@ function buildVaultReadme(): string {
     "- `20-CARDS/`：问题卡、洞察卡、观点卡、反驳卡、术语卡、摘录卡。",
     "- `30-THREADS/`：围绕一次阅读现场的连续讨论。",
     "- `40-MOC/`：主题索引、来源索引、阅读线索。",
-    "- `90-SYSTEM/`：schema、模板、TWYR skill 和索引状态。",
+    "- `90-SYSTEM/`：schema、模板、Think Anytime skill 和索引状态。",
     "",
   ].join("\n");
 }
 
 function buildSchemaDoc(): string {
   return [
-    "# TWYR Schema",
+    "# Think Anytime Schema",
     "",
     "## 保存等级",
     "",
@@ -337,9 +337,9 @@ function buildSchemaDoc(): string {
 
 function buildRetrievalSkill(): string {
   return [
-    "# TWYR Retrieval Skill",
+    "# Think Anytime Retrieval Skill",
     "",
-    "目标：判断什么时候调用 TWYR / Obsidian 知识库。",
+    "目标：判断什么时候调用 Think Anytime / Obsidian 知识库。",
     "",
     "## 默认策略",
     "",

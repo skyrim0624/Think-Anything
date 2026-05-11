@@ -35,7 +35,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (!isAuthenticated(request)) {
-      sendJson(response, 401, { error: "未授权", detail: "请在 TWYR 扩展中填写本地 Bridge token。" });
+      sendJson(response, 401, { error: "未授权", detail: "请在 Think Anytime 扩展中填写本地 Bridge token。" });
       return;
     }
 
@@ -74,15 +74,15 @@ const server = createServer(async (request, response) => {
     sendJson(response, 404, { error: "未找到接口" });
   } catch (error) {
     sendJson(response, 500, {
-      error: "TWYR Bridge 处理失败",
+      error: "Think Anytime Bridge 处理失败",
       detail: error instanceof Error ? error.message : String(error),
     });
   }
 });
 
 server.listen(config.port, config.host, () => {
-  console.log(`TWYR Bridge 正在运行：${config.bridgeUrl}`);
-  console.log(`TWYR vault：${config.vaultPath}`);
+  console.log(`Think Anytime Bridge 正在运行：${config.bridgeUrl}`);
+  console.log(`Think Anytime vault：${config.vaultPath}`);
   console.log(`Chrome 扩展 token 位于：${config.configPath}`);
 });
 
@@ -96,7 +96,7 @@ async function handleStatus(request: IncomingMessage, response: ServerResponse):
     indexReady: retrieval.indexReady,
     codexSdkAvailable: await isCodexSdkAvailable(),
     codexCliPath: isCodexCliAvailable(config) ? config.codexCommand : undefined,
-    message: "TWYR Bridge 可用。",
+    message: "Think Anytime Bridge 可用。",
   });
 }
 
@@ -125,7 +125,7 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
       sendJson(response, 503, {
         error: "Codex 登录不可用",
         detail:
-          "TWYR 的 Chrome 捕获和本地 Bridge 已经连通，但本机 Codex CLI 当前凭据不可用。请重新执行 Codex 登录，或用有效 OPENAI_API_KEY 登录后再提问。",
+          "Think Anytime 的 Chrome 捕获和本地 Bridge 已经连通，但本机 Codex CLI 当前凭据不可用。请重新执行 Codex 登录，或用有效 OPENAI_API_KEY 登录后再提问。",
       });
       return;
     }

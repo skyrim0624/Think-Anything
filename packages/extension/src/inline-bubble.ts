@@ -52,14 +52,14 @@ export function openInlineBubble(options: InlineBubbleOptions): void {
   ensureBubble(options);
   positionBubble();
   renderBubble(options);
-  options.showToast("Think：原位对话已打开");
+  options.showToast("Think Anytime：原位对话已打开");
   getTextarea()?.focus();
 }
 
 export async function quickSaveInlineSelection(options: InlineBubbleOptions): Promise<void> {
   const context = options.captureContext();
   if (!context.selectionText && !context.visualAssets?.length) {
-    options.showToast("Think：请先选中文本或指向图片/视频再快速保存");
+    options.showToast("Think Anytime：请先选中文本或指向图片/视频再快速保存");
     return;
   }
   try {
@@ -74,7 +74,7 @@ export async function quickSaveInlineSelection(options: InlineBubbleOptions): Pr
           : "用户通过 Option+V 在阅读现场快速保存视觉材料。",
       },
     });
-    options.showToast("Think：选区已保存");
+    options.showToast("Think Anytime：选区已保存");
   } catch (error) {
     options.showToast(error instanceof Error ? error.message : String(error));
   }
@@ -156,7 +156,7 @@ function renderBubble(options: InlineBubbleOptions): void {
   if (saveButton) saveButton.title = buildSaveButtonTitle();
   if (retrieveButton) retrieveButton.toggleAttribute("disabled", isBusy || !currentContext);
   if (promoteButton) promoteButton.toggleAttribute("disabled", isBusy || !currentContext);
-  if (promoteButton) promoteButton.title = "确认后将当前页面全文写入 Think 长期资料库";
+  if (promoteButton) promoteButton.title = "确认后将当前页面全文写入 Think Anytime 长期资料库";
   if (textarea && !textarea.value.trim() && !lastQuestion) textarea.placeholder = DEFAULT_QUESTION;
 
   positionBubble();
@@ -250,7 +250,7 @@ function buildCapturePlan(context: ReadingContext): { level: CaptureLevel; cardT
 }
 
 function logCaptureDetails(context: ReadingContext): void {
-  console.info("[Think] Inline context captured", {
+  console.info("[Think Anytime] Inline context captured", {
     title: context.source.title,
     site: context.source.site,
     selectionLength: context.selectionText?.length ?? 0,
@@ -265,7 +265,7 @@ function logCaptureDetails(context: ReadingContext): void {
 }
 
 function buildSaveButtonTitle(): string {
-  if (!lastSaveRecommendation) return "保存到 Think";
+  if (!lastSaveRecommendation) return "保存到 Think Anytime";
   const level = lastSaveRecommendation.level === "source" ? "card" : lastSaveRecommendation.level;
   return `按 AI 建议保存为 ${level}/${lastSaveRecommendation.cardType}`;
 }
@@ -302,7 +302,7 @@ async function retrieveRelatedNotes(options: InlineBubbleOptions): Promise<void>
 
 async function promoteCurrentSource(options: InlineBubbleOptions): Promise<void> {
   if (!currentContext || isBusy) return;
-  const confirmed = window.confirm("确认将当前页面全文保存到 Think 的 10-SOURCES 吗？");
+  const confirmed = window.confirm("确认将当前页面全文保存到 Think Anytime 的 10-SOURCES 吗？");
   if (!confirmed) {
     messages.push({ role: "system", content: "已取消全文入库。" });
     renderBubble(options);
@@ -346,7 +346,7 @@ async function openExpandedWorkbench(): Promise<void> {
 
 function buildSourceSummary(): string {
   if (!lastAnswer) return "待整理。";
-  return `最近一次 Think 回答摘要：\n\n${lastAnswer.slice(0, 1800)}`;
+  return `最近一次 Think Anytime 回答摘要：\n\n${lastAnswer.slice(0, 1800)}`;
 }
 
 function buildPromoteReason(): string {
@@ -363,7 +363,7 @@ function buildPromoteReason(): string {
 async function sendInlineRequest<T>(message: RuntimeMessage): Promise<T> {
   const response = (await chrome.runtime.sendMessage(message)) as InlineApiResult<T>;
   if (!response?.ok) {
-    throw new Error(response?.error || "Think 请求失败");
+    throw new Error(response?.error || "Think Anytime 请求失败");
   }
   return response.data;
 }
@@ -654,7 +654,7 @@ function buildShell(): string {
         }
       }
     </style>
-    <section class="bubble" role="dialog" aria-label="Think 原位对话框">
+    <section class="bubble" role="dialog" aria-label="Think Anytime 原位对话框">
       <div class="messages" data-role="messages" aria-live="polite"></div>
       <div class="composer">
         <textarea data-role="question" placeholder="${DEFAULT_QUESTION}"></textarea>
@@ -666,7 +666,7 @@ function buildShell(): string {
             <button class="tool-button" type="button" data-action="expand">展开</button>
           </div>
           <div class="primary-actions">
-            <button class="tool-button close" type="button" data-action="close" aria-label="关闭 Think 原位对话框">×</button>
+            <button class="tool-button close" type="button" data-action="close" aria-label="关闭 Think Anytime 原位对话框">×</button>
             <button class="send-button" type="button" data-action="send">发送</button>
           </div>
         </div>

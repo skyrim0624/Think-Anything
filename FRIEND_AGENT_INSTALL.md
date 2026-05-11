@@ -6,11 +6,11 @@
 
 ## 任务
 
-你要在这台电脑上安装并配置 Think Anything。
+你要在这台电脑上安装并配置 Think Anytime。
 
-Think Anything 是一个 Chrome + Obsidian + Codex 阅读知识工作台。它包含：
+Think Anytime 是一个 Chrome + Obsidian + Codex 阅读知识工作台。它包含：
 
-- Chrome 扩展：在网页选区旁呼出 Think 对话框。
+- Chrome 扩展：在网页选区旁呼出 Think Anytime 对话框。
 - 本地 Bridge：只监听 `127.0.0.1`，负责调用 Codex 并写入 Obsidian Markdown vault。
 - Obsidian vault：保存卡片、全文、讨论线程、图片/视频帧截图。
 
@@ -26,7 +26,7 @@ https://github.com/skyrim0624/Think-Anything
 2. 本地 Bridge 能启动，`GET /api/status` 返回可用。
 3. Chrome 已加载 `packages/extension/dist` 这个本地扩展。
 4. 扩展设置里已填入 Bridge URL 和 token。
-5. 用户能用 `Option+S` 在网页选区旁呼出 Think 对话框。
+5. 用户能用 `Option+S` 在网页选区旁呼出 Think Anytime 对话框。
 6. 用户能用 `Option+V` 快速保存选区或视觉材料。
 
 ## 安装步骤
@@ -96,7 +96,7 @@ mkdir -p "$HOME/Documents/TWYR"
 npm run start:bridge
 ```
 
-如果这个命令占住终端，看到 `TWYR Bridge 正在运行` 后即可另开终端继续，或先停止后写后台启动配置。
+如果这个命令占住终端，看到 `Think Anytime Bridge 正在运行` 后即可另开终端继续，或先停止后写后台启动配置。
 
 配置文件位置：
 
@@ -191,7 +191,7 @@ $HOME/Projects/Think-Anything/packages/extension/dist
 2. 开启“开发者模式”。
 3. 点击“加载已解压的扩展程序”。
 4. 选择上面的 `packages/extension/dist`。
-5. 打开 Think 扩展的设置页。
+5. 打开 Think Anytime 扩展的设置页。
 6. 填：
    - Bridge URL：`http://127.0.0.1:47321`
    - Token：读取 `~/.twyr/config.json` 里的 `token`
@@ -204,9 +204,9 @@ $HOME/Projects/Think-Anything/packages/extension/dist
 
 1. 选中一段文字。
 2. 按 `Option+S`。
-3. 应出现 Think 原位对话框。
+3. 应出现 Think Anytime 原位对话框。
 4. 输入“解释一下这段话”，按 `Enter`。
-5. 右键一张图片或一个视频，应该能看到 `Think：查看这张图片/视频`。
+5. 右键一张图片或一个视频，应该能看到 `Think Anytime：查看这张图片/视频`。
 6. 点击对话框里的 `保存`。
 7. 检查 vault 里是否出现：
 
@@ -220,7 +220,7 @@ $HOME/Projects/Think-Anything/packages/extension/dist
 
 完成后，把下面信息发给用户：
 
-- Think Anything 仓库路径。
+- Think Anytime 仓库路径。
 - Obsidian vault 路径。
 - Bridge 是否已后台运行。
 - Chrome 扩展是否已加载。

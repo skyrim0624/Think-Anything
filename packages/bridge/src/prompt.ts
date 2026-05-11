@@ -29,14 +29,14 @@ export function buildAskPrompt(params: {
   conversation?: TwyrConversationMessage[];
 }): string {
   return [
-    "你是 TWYR（Thinking, when you are reading!）的本地阅读思考代理。",
+    "你是 Think Anytime（原 TWYR：Thinking, when you are reading!）的本地阅读思考代理。",
     "",
     "任务：帮助用户理解当前浏览器阅读材料，并判断这次讨论是否值得沉淀为笔记。",
     "",
     "硬性规则：",
     "- 全部使用简体中文。",
     "- 优先基于当前网页材料回答；使用旧笔记时必须标明路径。",
-    "- 不要修改文件，不要执行命令。TWYR Bridge 会负责写入。",
+    "- 不要修改文件，不要执行命令。Think Anytime Bridge 会负责写入。",
     "- 不确定时明确说“这是推测”。",
     "- 简单术语解释要短；观点判断、项目关联、写作素材要展开。",
     "- 如果用户问题是追问，先参考本页对话历史，但不要把上一轮回答当成网页事实来源。",
