@@ -13,6 +13,8 @@ Chrome 扩展的显示名是 `Think Anytime`。代码仓库地址仍是历史名
 - 按 `Option+V` 快速保存当前选区或视觉材料。
 - 保存后自动生成知识消化结构：一句话摘要、主题线索、兴趣点、后续问题、检索提示。
 - 检索旧笔记时混合使用标题、摘要、主题、正文、路径、短语和本地语义重合度排序。
+- 后台记录可回放 trace，回答可一键反馈“有用/没用”，用于后续评测和降权。
+- 生成 Dream Proposal：把可能相关的笔记关系写成可审计提案，不自动污染长期知识库。
 - 长期知识沉淀到 Obsidian：临时收件箱、全文来源、问题卡、洞察卡、讨论线程、主题索引。
 
 ## 架构
@@ -152,7 +154,7 @@ npm run build
 20-CARDS/          问题卡、洞察卡、观点卡、反驳卡、术语卡、摘录卡
 30-THREADS/        围绕网页或主题的连续讨论
 40-MOC/            来源索引、主题索引、阅读线索
-90-SYSTEM/         schema、模板、skill、SQLite 索引
+90-SYSTEM/         schema、模板、skill、SQLite 索引、harness、dream 提案
 ```
 
 新保存的卡片和全文会包含 `## 知识消化`：
@@ -163,6 +165,27 @@ npm run build
 - `后续问题`：把阅读现场延伸成可继续思考的问题。
 - `检索提示`：说明未来什么问题应该找回这条记录。
 
+## Harness 与 Dream Proposal
+
+Think Anytime Harness 用来验证系统是不是真的在变聪明，而不是只生成听起来合理的整理结论。
+
+- Trace：`90-SYSTEM/harness/traces/YYYY-MM-DD.jsonl`，记录每次 ask、capture、retrieve、promote、dream 的后台判断。
+- Feedback：`90-SYSTEM/harness/feedback.jsonl`，记录你对回答、检索和整理建议的接受或拒绝。
+- Eval Run：`90-SYSTEM/harness/eval-runs/`，保存本地评测运行结果。
+- Dream Proposal：`90-SYSTEM/dreams/*-proposal.md`，只生成可审计提案，不直接改 `20-CARDS/` 或 `40-MOC/`。
+
+Dream Proposal v0 会先从现有混合检索中找候选关系，再让 Codex 判断关系类型。Codex 不可用时，会退回到保守的本地相似度提案，并明确标注这只是相似，不等于深层关系。
+
+当前关系类型：
+
+- `same-topic`
+- `extends`
+- `contradicts`
+- `example-of`
+- `method-for`
+- `design-preference`
+- `question-raised-by`
+
 ## API
 
 除 `/api/status` 外，所有接口都需要 `x-twyr-token`。
@@ -172,6 +195,8 @@ npm run build
 - `POST /api/capture`：保存片段、卡片或视觉材料。
 - `POST /api/retrieve`：手动查旧笔记。
 - `POST /api/promote-source`：确认后全文入库。
+- `POST /api/feedback`：记录回答、检索或整理建议的用户反馈。
+- `POST /api/dream/propose`：生成后台整理提案。
 
 ## 安全边界
 
@@ -189,6 +214,7 @@ npm run check
 npm run build
 npm run start:bridge
 npm run build:extension
+npm run eval:harness
 ```
 
 ## macOS 后台启动示例
@@ -236,5 +262,7 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.local.think-anything.b
 - 视频理解目前是“当前帧截图”，不是自动看完整视频。
 - 原位对话框的 `停止` 会忽略迟到结果，但不会真正取消已经发给 Codex 的底层请求。
 - 当前不是 token 级流式输出；回答仍是完成后一次性显示。
+- Harness v0 先覆盖检索决策评测；关系质量、偏好识别、时间变化类评测会继续扩展。
+- Dream Proposal v0 只提案，不提供自动 apply。
 - 截图式视觉素材库、设计偏好库、多帧视频采样、文件拖拽还在后续路线里。
 - Chrome 全局快捷键可能被系统或其他扩展占用，可在 `chrome://extensions/shortcuts` 手动调整。
