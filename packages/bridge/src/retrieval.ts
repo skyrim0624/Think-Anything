@@ -300,7 +300,7 @@ function scoreNote(note: IndexedNote, profile: SearchProfile): RetrievedNote | n
     reasonParts.push(`主题线索：${matchedTopics.slice(0, 5).join("、")}`);
   }
   if (phraseMatches.length) {
-    reasonParts.push(`短语相近：${phraseMatches.slice(0, 4).join("、")}`);
+    reasonParts.push(`短语相近：${summarizeMatchedTerms(phraseMatches).slice(0, 4).join("、")}`);
   }
   if (overlap > 0) {
     reasonParts.push(`语义重合度：${Math.round(overlap * 100)}%`);
@@ -375,8 +375,9 @@ function extractDigestTopics(body: string, title: string): string[] {
 function summarizeMatchedTerms(terms: string[]): string[] {
   const unique = Array.from(new Set(terms));
   const readable = unique.filter((term) => {
-    if (term.length > 2) return true;
-    return !unique.some((other) => other !== term && other.includes(term));
+    if (term.length > 10) return false;
+    if (unique.some((other) => other !== term && other.length > term.length && other.includes(term))) return false;
+    return term.length > 2;
   });
   return readable.slice(0, 8);
 }
