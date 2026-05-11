@@ -1,6 +1,7 @@
 import type {
   AskRequest,
   CaptureRequest,
+  FeedbackRequest,
   PromoteSourceRequest,
   ReadingContext,
   RetrieveRequest,
@@ -32,6 +33,7 @@ export type RuntimeMessage =
   | { type: "TWYR_INLINE_CAPTURE"; body: CaptureRequest }
   | { type: "TWYR_INLINE_RETRIEVE"; body: RetrieveRequest }
   | { type: "TWYR_INLINE_PROMOTE_SOURCE"; body: PromoteSourceRequest }
+  | { type: "TWYR_INLINE_FEEDBACK"; body: FeedbackRequest }
   | { type: "TWYR_OPEN_PANEL"; action: PendingAction; preferStandalone?: boolean }
   | { type: "TWYR_SELECTION_CAPTURED"; action: PendingAction };
 

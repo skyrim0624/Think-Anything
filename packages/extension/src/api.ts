@@ -6,6 +6,8 @@ import {
   type AskResponse,
   type CaptureRequest,
   type CaptureResponse,
+  type FeedbackRequest,
+  type FeedbackResponse,
   type PromoteSourceRequest,
   type PromoteSourceResponse,
   type RetrieveRequest,
@@ -52,6 +54,13 @@ export async function retrieveTwyr(
   body: RetrieveRequest,
 ): Promise<RetrieveResponse> {
   return request<RetrieveResponse>(settings, "/api/retrieve", "POST", body);
+}
+
+export async function sendFeedback(
+  settings: ExtensionSettings,
+  body: FeedbackRequest,
+): Promise<FeedbackResponse> {
+  return request<FeedbackResponse>(settings, "/api/feedback", "POST", body);
 }
 
 export async function promoteSource(

@@ -388,6 +388,30 @@ button:disabled {
   border-top: 1px solid var(--color-border);
 }
 
+.feedback-actions {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.feedback-actions button {
+  min-height: 30px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-muted);
+  padding: 5px 9px;
+  cursor: pointer;
+}
+
+.feedback-actions button:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-foreground);
+}
+
 .recommendation svg {
   flex: 0 0 auto;
   margin-top: 1px;

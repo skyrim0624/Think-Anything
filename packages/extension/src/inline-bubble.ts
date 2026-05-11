@@ -2,6 +2,7 @@ import type {
   AskResponse,
   CaptureResponse,
   CaptureLevel,
+  FeedbackRating,
   PromoteSourceResponse,
   ReadingContext,
   RetrieveResponse,
@@ -21,6 +22,8 @@ type InlineRole = "user" | "assistant" | "system";
 interface InlineMessage {
   role: InlineRole;
   content: string;
+  response?: AskResponse;
+  feedbackRating?: FeedbackRating;
 }
 
 type InlineApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -154,16 +157,18 @@ function renderBubble(options: InlineBubbleOptions): void {
 
   if (messageList) {
     messageList.innerHTML = messages
-      .map((message) => {
+      .map((message, index) => {
         const longClass = message.role === "assistant" && message.content.length > 1200 ? " message-long" : "";
         return `<article class="message message-${message.role}${longClass}">
           <div class="message-role">${roleLabel(message.role)}</div>
           <div class="message-body">${escapeHtml(message.content)}</div>
+          ${renderFeedbackControls(message, index)}
         </article>`;
       })
       .join("");
     messageList.hidden = messages.length === 0;
     messageList.scrollTop = messageList.scrollHeight;
+    bindFeedbackButtons(options);
   }
   if (sendButton) sendButton.textContent = isBusy ? "停止" : "发送";
   if (sendButton) sendButton.toggleAttribute("disabled", !currentContext);
@@ -208,7 +213,7 @@ async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: str
     lastAnswer = response.answer;
     lastThreadPath = response.threadPath;
     lastSaveRecommendation = response.saveRecommendation;
-    messages.push({ role: "assistant", content: response.answer });
+    messages.push({ role: "assistant", content: response.answer, response });
   } catch (error) {
     if (requestId !== activeRequestId) return;
     messages.push({ role: "system", content: error instanceof Error ? error.message : String(error) });
@@ -384,6 +389,32 @@ async function openExpandedWorkbench(): Promise<void> {
   await chrome.runtime.sendMessage({ type: "TWYR_OPEN_PANEL", action, preferStandalone: true });
 }
 
+async function sendInlineFeedback(
+  options: InlineBubbleOptions,
+  messageIndex: number,
+  rating: FeedbackRating,
+): Promise<void> {
+  const message = messages[messageIndex];
+  if (!message?.response?.traceId) return;
+  message.feedbackRating = rating;
+  renderBubble(options);
+  try {
+    await sendInlineRequest({
+      type: "TWYR_INLINE_FEEDBACK",
+      body: {
+        targetType: "answer",
+        rating,
+        traceId: message.response.traceId,
+        sourceUrl: currentContext?.source.url,
+        sourceTitle: currentContext?.source.title,
+      },
+    });
+  } catch (error) {
+    messages.push({ role: "system", content: `反馈记录失败：${error instanceof Error ? error.message : String(error)}` });
+    renderBubble(options);
+  }
+}
+
 function buildSourceSummary(): string {
   if (!lastAnswer) return "待整理。";
   return `最近一次 Think Anytime 回答摘要：\n\n${lastAnswer.slice(0, 1800)}`;
@@ -451,6 +482,17 @@ function getTextarea(): HTMLTextAreaElement | null {
 
 function getButton(action: string): HTMLButtonElement | null {
   return shadow?.querySelector<HTMLButtonElement>(`[data-action='${action}']`) ?? null;
+}
+
+function bindFeedbackButtons(options: InlineBubbleOptions): void {
+  shadow?.querySelectorAll<HTMLButtonElement>("[data-feedback-rating]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const messageIndex = Number(button.dataset.messageIndex);
+      const rating = button.dataset.feedbackRating as FeedbackRating | undefined;
+      if (!rating) return;
+      void sendInlineFeedback(options, messageIndex, rating);
+    });
+  });
 }
 
 function buildShell(): string {
@@ -541,6 +583,22 @@ function buildShell(): string {
         max-height: 180px;
         overflow: auto;
         padding-right: 4px;
+      }
+
+      .feedback-actions {
+        margin-top: 8px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: #6b7280;
+        font-size: 11px;
+      }
+
+      .feedback-actions button {
+        min-height: 28px;
+        padding: 4px 8px;
+        color: #6b7280;
+        font-size: 11px;
       }
 
       .composer {
@@ -729,6 +787,17 @@ function buildShell(): string {
       </div>
     </section>
   `;
+}
+
+function renderFeedbackControls(message: InlineMessage, messageIndex: number): string {
+  if (message.role !== "assistant" || !message.response?.traceId) return "";
+  if (message.feedbackRating) {
+    return `<div class="feedback-actions">已记录：${message.feedbackRating === "useful" ? "有用" : "没用"}</div>`;
+  }
+  return `<div class="feedback-actions" aria-label="回答反馈">
+    <button type="button" data-message-index="${messageIndex}" data-feedback-rating="useful">有用</button>
+    <button type="button" data-message-index="${messageIndex}" data-feedback-rating="notUseful">没用</button>
+  </div>`;
 }
 
 function roleLabel(role: InlineRole): string {

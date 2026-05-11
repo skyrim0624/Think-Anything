@@ -1,6 +1,6 @@
 import type { ReadingContext, VisualAsset, VisualRect, VisualViewport } from "@twyr/shared";
 import type { PendingAction, RuntimeMessage } from "./messages.js";
-import { askTwyr, captureTwyr, loadSettings, promoteSource, retrieveTwyr } from "./api.js";
+import { askTwyr, captureTwyr, loadSettings, promoteSource, retrieveTwyr, sendFeedback } from "./api.js";
 import { PENDING_ACTION_KEY } from "./messages.js";
 
 const MENU_IDS = {
@@ -121,6 +121,10 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     );
     return true;
   }
+  if (message.type === "TWYR_INLINE_FEEDBACK") {
+    void handleInlineApi(() => sendFeedbackFromStorage(message.body), sendResponse);
+    return true;
+  }
   if (message.type !== "TWYR_OPEN_PANEL" && message.type !== "TWYR_SELECTION_CAPTURED") return false;
   const tabId = sender.tab?.id;
   if (!tabId) return false;
@@ -148,6 +152,10 @@ async function retrieveTwyrFromStorage(body: Parameters<typeof retrieveTwyr>[1])
 
 async function promoteSourceFromStorage(body: Parameters<typeof promoteSource>[1]): ReturnType<typeof promoteSource> {
   return promoteSource(await loadSettings(), body);
+}
+
+async function sendFeedbackFromStorage(body: Parameters<typeof sendFeedback>[1]): ReturnType<typeof sendFeedback> {
+  return sendFeedback(await loadSettings(), body);
 }
 
 async function captureVisualContext(context: ReadingContext, sourceTabId?: number): Promise<ReadingContext> {

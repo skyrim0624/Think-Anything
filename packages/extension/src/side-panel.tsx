@@ -4,11 +4,12 @@ import { BookMarked, Brain, Check, Database, Link2, Save, Settings, ShieldQuesti
 import type {
   ApiStatus,
   AskResponse,
+  FeedbackRating,
   ReadingContext,
   RetrievedNote,
   TwyrActionMode,
 } from "@twyr/shared";
-import { askTwyr, captureTwyr, getStatus, loadSettings, promoteSource, retrieveTwyr, saveSettings, type ExtensionSettings } from "./api.js";
+import { askTwyr, captureTwyr, getStatus, loadSettings, promoteSource, retrieveTwyr, saveSettings, sendFeedback, type ExtensionSettings } from "./api.js";
 import type { PageContextResponse, PendingAction } from "./messages.js";
 import { PENDING_ACTION_KEY } from "./messages.js";
 
@@ -25,6 +26,7 @@ function App(): React.ReactElement {
   const [context, setContext] = useState<ReadingContext | null>(null);
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
+  const [feedbackByTrace, setFeedbackByTrace] = useState<Record<string, FeedbackRating>>({});
   const [isBusy, setIsBusy] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const sourceTabIdRef = useRef<number | undefined>(undefined);
@@ -208,6 +210,26 @@ function App(): React.ReactElement {
     }
   }
 
+  async function runFeedback(message: Message, rating: FeedbackRating): Promise<void> {
+    if (message.role !== "assistant" || !message.response?.traceId) return;
+    const traceId = message.response.traceId;
+    setFeedbackByTrace((current) => ({ ...current, [traceId]: rating }));
+    try {
+      await sendFeedback(settings, {
+        targetType: "answer",
+        rating,
+        traceId,
+        sourceUrl: context?.source.url,
+        sourceTitle: context?.source.title,
+      });
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        { role: "system", content: `反馈记录失败：${error instanceof Error ? error.message : String(error)}` },
+      ]);
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="header">
@@ -294,7 +316,14 @@ function App(): React.ReactElement {
         {messages.length === 0 ? (
           <div className="empty">选中文字后提问，或者直接保存当前页面。</div>
         ) : (
-          messages.map((message, index) => <MessageView key={index} message={message} />)
+          messages.map((message, index) => (
+            <MessageView
+              key={index}
+              message={message}
+              feedbackRating={message.role === "assistant" && message.response?.traceId ? feedbackByTrace[message.response.traceId] : undefined}
+              onFeedback={(rating) => void runFeedback(message, rating)}
+            />
+          ))
         )}
       </section>
 
@@ -348,11 +377,35 @@ async function captureVisualContext(context: ReadingContext, sourceTabId: number
   }
 }
 
-function MessageView({ message }: { message: Message }): React.ReactElement {
+function MessageView({
+  message,
+  feedbackRating,
+  onFeedback,
+}: {
+  message: Message;
+  feedbackRating?: FeedbackRating;
+  onFeedback: (rating: FeedbackRating) => void;
+}): React.ReactElement {
   return (
     <article className={`message message-${message.role}`}>
       <div className="message-role">{message.role === "assistant" ? "Think" : message.role === "user" ? "你" : "系统"}</div>
       <div className="message-body">{message.content}</div>
+      {message.role === "assistant" && message.response?.traceId ? (
+        <div className="feedback-actions" aria-label="回答反馈">
+          {feedbackRating ? (
+            <span>已记录：{feedbackRating === "useful" ? "有用" : "没用"}</span>
+          ) : (
+            <>
+              <button type="button" onClick={() => onFeedback("useful")}>
+                有用
+              </button>
+              <button type="button" onClick={() => onFeedback("notUseful")}>
+                没用
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
       {message.role === "assistant" && message.response ? (
         <div className="recommendation">
           <Check size={14} />
