@@ -13,11 +13,11 @@ TWYR 的主体验不应继续停留在“选中文字后打开侧边栏”。新
 ## 目标体验
 
 1. 用户在任意网页选中一段文字。
-2. 按 `Option+V` 打开选区旁的 Inline Codex Bubble。
+2. 按 `Option+S` 打开选区旁的 Inline Codex Bubble。
 3. 输入疑问后按 `Enter` 发送，`Shift+Enter` 换行，`Esc` 关闭。
 4. AI 基于选区、附近上下文、页面正文、URL、标题、已有 TWYR 笔记给出回答。
 5. 对话框内可继续追问，也可执行保存、查旧笔记、展开工作台。
-6. `Option+S` 快速保存当前选区，不弹出大型工作台。
+6. `Option+V` 快速保存当前选区，不弹出大型工作台。
 7. 侧边栏保留，用于长对话、全文入库、设置、复杂整理。
 
 ## 交互原则
@@ -33,7 +33,7 @@ TWYR 的主体验不应继续停留在“选中文字后打开侧边栏”。新
 | 步骤 | 状态 | 目标 | 交付物 |
 | --- | --- | --- | --- |
 | 0 | 已完成 | 初始化 Git 仓库、绑定远端、写入本计划 | `docs/inline-codex-plan.md`，首次 commit/push |
-| 1 | 已完成 | 建立 Inline Bubble 消息协议和快捷键入口 | `Option+V` 打开原位输入框，`Option+S` 快速保存入口 |
+| 1 | 已完成 | 建立 Inline Bubble 消息协议和快捷键入口 | `Option+S` 打开原位输入框，`Option+V` 快速保存入口 |
 | 2 | 已完成 | 完成 Inline Bubble MVP | 选区旁输入、发送、回答、继续追问、关闭 |
 | 3 | 已完成 | 接入知识动作 | 保存、查旧笔记、展开工作台 |
 | 4 | 已完成 | 强化知识沉淀策略 | 保存问答链路、卡片元数据、检索理由展示 |
@@ -52,7 +52,7 @@ TWYR 的主体验不应继续停留在“选中文字后打开侧边栏”。新
 
 - **网页 CSS 污染浮层**：使用 Shadow DOM 隔离样式。
 - **小窗承载不了长回答**：限制最大高度，内部滚动，并提供“展开工作台”。
-- **快捷键冲突**：优先实现 `Alt+V`/`Alt+S`，如果 Chrome 不接受 `Option+V`，保留用户可在 `chrome://extensions/shortcuts` 自行绑定。
+- **快捷键冲突**：优先实现 `Alt+S`/`Alt+V`，如果 Chrome 不接受 `Option+S`，保留用户可在 `chrome://extensions/shortcuts` 自行绑定。
 - **保存污染知识库**：默认只保存用户主动点击的内容；AI 只建议全文入库，不自动提升为 source。
 - **查库过度**：检索结果必须说明引用了哪些笔记，以及为什么相关。
 
@@ -60,12 +60,12 @@ TWYR 的主体验不应继续停留在“选中文字后打开侧边栏”。新
 
 - `e3d8d89`：初始化 TWYR Git 仓库，写入 Inline Codex 更新计划，并推送到 `https://github.com/skyrim0624/twyr`。
 - `d90cc6f`：标记仓库初始化步骤完成，并同步计划状态。
-- `3dd73da`：实现 Inline Codex Bubble、`Option+V` 原位提问、`Option+S` 快速保存、保存/查库/展开动作，并更新 README。
+- `3dd73da`：实现 Inline Codex Bubble、原位提问、快速保存、保存/查库/展开动作，并更新 README。后续快捷键已调整为 `Option+S` 唤起、`Option+V` 保存。
 - `b447eec`：增加页面内快捷键兜底，修复重复打开提示，避免 TWYR 对话框内抢快捷键。
 
 ## 验证记录
 
 - `npm run check && npm run build` 已通过。
 - 构建产物已生成到 `packages/extension/dist`，Chrome 加载的本地扩展路径保持不变。
-- 临时 Chromium 使用 `packages/extension/dist` 加载 TWYR 扩展后，已验证 `Option+V` 能在选区旁打开 Inline Bubble，页面上出现标题、站点、选区字数、输入框和操作按钮。
+- 临时 Chromium 使用 `packages/extension/dist` 加载 TWYR 扩展后，已验证原位 Bubble 能在选区旁打开。当前新版快捷键为 `Option+S` 唤起、`Option+V` 保存。
 - 当前已登录 Chrome 仍需要在 `chrome://extensions` 对 TWYR 点一次 reload，才能使用刚刚生成的最新构建。
