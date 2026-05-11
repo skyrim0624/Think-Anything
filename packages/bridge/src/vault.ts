@@ -26,6 +26,14 @@ const DIRECTORIES = [
   "90-SYSTEM/skills",
 ];
 
+interface KnowledgeDigest {
+  summary: string;
+  topics: string[];
+  interestPoints: string[];
+  followUpQuestions: string[];
+  retrievalHints: string[];
+}
+
 export class VaultService {
   constructor(private readonly config: BridgeConfig) {}
 
@@ -104,8 +112,12 @@ export class VaultService {
     const path = `${directory}/${todayPathDate()}-${cardType}-${slugify(titleBase)}-${shortHash(
       `${request.context.source.url}${titleBase}${Date.now()}`,
     )}.md`;
-    const markdown = buildCardMarkdown(request, level, cardType);
+    const digest = buildCaptureDigest(request, cardType);
+    const markdown = buildCardMarkdown(request, level, cardType, digest);
     writeFileSync(join(this.config.vaultPath, path), markdown);
+    if (level !== "scratch") {
+      this.appendKnowledgeIndex(path, request.question || request.note || request.context.source.title, digest);
+    }
     return {
       path,
       level,
@@ -121,8 +133,10 @@ export class VaultService {
     const slug = slugify(request.context.source.title);
     const hash = shortHash(request.context.source.url);
     const sourcePath = this.getAvailablePath(`10-SOURCES/${todayPathDate()}-${slug}-${hash}.md`);
-    const sourceMarkdown = buildSourceMarkdown(request);
+    const digest = buildSourceDigest(request);
+    const sourceMarkdown = buildSourceMarkdown(request, digest);
     writeFileSync(join(this.config.vaultPath, sourcePath), sourceMarkdown);
+    this.appendKnowledgeIndex(sourcePath, request.context.source.title, digest);
 
     const mocPath = "40-MOC/来源索引.md";
     const mocFullPath = join(this.config.vaultPath, mocPath);
@@ -163,6 +177,17 @@ export class VaultService {
     mkdirSync(dirname(join(this.config.vaultPath, fallback)), { recursive: true });
     return fallback;
   }
+
+  private appendKnowledgeIndex(relativePath: string, title: string, digest: KnowledgeDigest): void {
+    const indexPath = "40-MOC/阅读线索.md";
+    const fullPath = join(this.config.vaultPath, indexPath);
+    if (!existsSync(fullPath)) {
+      writeFileSync(fullPath, "# 阅读线索\n\nThink Anytime 会在这里汇总值得长期追踪的主题线索。\n");
+    }
+    const topics = digest.topics.length ? `主题：${digest.topics.join("、")}` : "主题：待整理";
+    const entry = `- ${localDateTime()} [[${relativePath.replace(/\.md$/, "")}|${title}]]：${digest.summary}（${topics}）\n`;
+    writeFileSync(fullPath, `${readFileSync(fullPath, "utf8").trimEnd()}\n${entry}`);
+  }
 }
 
 function buildThreadHeader(context: ReadingContext): string {
@@ -184,7 +209,12 @@ function buildThreadHeader(context: ReadingContext): string {
   ].join("\n");
 }
 
-function buildCardMarkdown(request: CaptureRequest, level: CaptureLevel, cardType: TwyrCardType): string {
+function buildCardMarkdown(
+  request: CaptureRequest,
+  level: CaptureLevel,
+  cardType: TwyrCardType,
+  digest: KnowledgeDigest,
+): string {
   return [
     "---",
     "type: twyr-card",
@@ -196,12 +226,16 @@ function buildCardMarkdown(request: CaptureRequest, level: CaptureLevel, cardTyp
     `site: ${yamlString(request.context.source.site)}`,
     `capturedAt: ${yamlString(new Date().toISOString())}`,
     `threadPath: ${yamlString(request.threadPath)}`,
+    `digestSummary: ${yamlString(digest.summary)}`,
+    `digestTopics: ${yamlList(digest.topics)}`,
     `tags: ${yamlList(["twyr", cardType])}`,
     "---",
     "",
     `# ${request.question || request.note || request.context.source.title}`,
     "",
     `来源：${request.context.source.url}`,
+    "",
+    formatKnowledgeDigest(digest),
     "",
     request.threadPath ? ["## 讨论线程", "", buildObsidianLink(request.threadPath, "打开完整阅读讨论"), ""].join("\n") : "",
     request.context.selectionText ? ["## 原文选区", "", blockquote(request.context.selectionText), ""].join("\n") : "",
@@ -251,7 +285,7 @@ function formatConversation(conversation: CaptureRequest["conversation"]): strin
     .join("\n\n");
 }
 
-function buildSourceMarkdown(request: PromoteSourceRequest): string {
+function buildSourceMarkdown(request: PromoteSourceRequest, digest: KnowledgeDigest): string {
   return [
     "---",
     "type: twyr-source",
@@ -263,6 +297,8 @@ function buildSourceMarkdown(request: PromoteSourceRequest): string {
     `publishedAt: ${yamlString(request.context.source.publishedAt)}`,
     `capturedAt: ${yamlString(new Date().toISOString())}`,
     `threadPath: ${yamlString(request.threadPath)}`,
+    `digestSummary: ${yamlString(digest.summary)}`,
+    `digestTopics: ${yamlList(digest.topics)}`,
     "tags: [twyr, source]",
     "---",
     "",
@@ -276,7 +312,9 @@ function buildSourceMarkdown(request: PromoteSourceRequest): string {
     "",
     "## 摘要",
     "",
-    request.summary ?? "待整理。",
+    request.summary ?? digest.summary,
+    "",
+    formatKnowledgeDigest(digest),
     "",
     "## 与我产生连接的点",
     "",
@@ -291,6 +329,201 @@ function buildSourceMarkdown(request: PromoteSourceRequest): string {
     "",
   ].join("\n");
 }
+
+function buildCaptureDigest(request: CaptureRequest, cardType: TwyrCardType): KnowledgeDigest {
+  const focus =
+    firstUsefulText(request.question, request.note, request.context.selectionText, request.answer, request.context.source.title) ||
+    "当前阅读材料";
+  const topics = extractDigestTopics([
+    request.question,
+    request.note,
+    request.answer,
+    request.context.selectionText,
+    request.context.source.title,
+    request.context.source.description,
+    request.context.headings?.join(" "),
+  ]);
+  const summary = buildCaptureSummary(request, focus);
+  const interestPoints = compactList([
+    request.question ? `用户主动追问：${normalizeInlineText(request.question, 140)}` : undefined,
+    request.note ? `用户手动记录：${normalizeInlineText(request.note, 140)}` : undefined,
+    request.context.selectionText ? "用户选中了这段原文，说明该表达、观点或信息触发了注意。" : undefined,
+    request.context.visualAssets?.length ? `用户关注了 ${request.context.visualAssets.length} 个视觉材料或当前画面。` : undefined,
+    request.reason ? `保存理由：${normalizeInlineText(request.reason, 160)}` : undefined,
+  ]);
+  return {
+    summary,
+    topics,
+    interestPoints: interestPoints.length ? interestPoints : ["这条记录保留了用户在阅读现场产生的注意力入口。"],
+    followUpQuestions: buildFollowUpQuestions(request, topics, cardType),
+    retrievalHints: buildRetrievalHints(request, topics, cardType),
+  };
+}
+
+function buildSourceDigest(request: PromoteSourceRequest): KnowledgeDigest {
+  const topics = extractDigestTopics([
+    request.reason,
+    request.summary,
+    request.context.selectionText,
+    request.context.source.title,
+    request.context.source.description,
+    request.context.headings?.join(" "),
+    request.context.pageText,
+  ]);
+  const summary =
+    request.summary ||
+    `《${request.context.source.title}》已被用户确认进入长期资料库；后续优先查看摘要和兴趣点，必要时再回到原文。`;
+  const interestPoints = compactList([
+    request.reason ? `入库理由：${normalizeInlineText(request.reason, 180)}` : undefined,
+    request.context.selectionText ? `用户与文章产生连接的选区：${normalizeInlineText(request.context.selectionText, 180)}` : undefined,
+    request.threadPath ? `已有讨论线程：${request.threadPath}` : undefined,
+    request.context.visualAssets?.length ? `包含 ${request.context.visualAssets.length} 个视觉附件，可作为图像或视频画面线索。` : undefined,
+  ]);
+  return {
+    summary,
+    topics,
+    interestPoints: interestPoints.length ? interestPoints : ["用户确认这篇材料值得作为长期资料保存。"],
+    followUpQuestions: [
+      `这篇资料最值得复用的观点或方法是什么？`,
+      `它和我已有的项目、写作或 CMI 相关思考有什么关系？`,
+      `未来什么时候应该回到这篇原文，而不是只看摘要？`,
+    ],
+    retrievalHints: buildRetrievalHintsFromParts(request.context, topics, "source"),
+  };
+}
+
+function buildCaptureSummary(request: CaptureRequest, focus: string): string {
+  const title = request.context.source.title || "当前页面";
+  const normalizedFocus = normalizeInlineText(focus, 120);
+  if (request.answer) {
+    return `围绕《${title}》中的「${normalizedFocus}」保存了一次阅读讨论，包含用户问题、Think Anytime 回答和后续检索线索。`;
+  }
+  if (request.context.visualAssets?.length && !request.context.selectionText) {
+    return `保存了《${title}》中的视觉材料，后续可按页面主题、画面内容或用户记录重新检索。`;
+  }
+  if (request.context.selectionText) {
+    return `保存了《${title}》中的一段选区：「${normalizeInlineText(request.context.selectionText, 120)}」。`;
+  }
+  return `保存了《${title}》的阅读现场，等待后续讨论或整理。`;
+}
+
+function formatKnowledgeDigest(digest: KnowledgeDigest): string {
+  return [
+    "## 知识消化",
+    "",
+    "### 一句话摘要",
+    "",
+    digest.summary,
+    "",
+    "### 主题线索",
+    "",
+    formatList(digest.topics.length ? digest.topics : ["待整理"]),
+    "",
+    "### 与我产生连接的点",
+    "",
+    formatList(digest.interestPoints),
+    "",
+    "### 后续问题",
+    "",
+    formatList(digest.followUpQuestions),
+    "",
+    "### 检索提示",
+    "",
+    formatList(digest.retrievalHints),
+  ].join("\n");
+}
+
+function buildFollowUpQuestions(
+  request: CaptureRequest,
+  topics: string[],
+  cardType: TwyrCardType,
+): string[] {
+  const primaryTopic = topics[0] || request.context.source.title || "这个材料";
+  const questions = [
+    `这个内容和我之前关于「${primaryTopic}」的思考有什么连接？`,
+    `这条记录以后可以支持哪篇文章、项目判断或产品设计？`,
+  ];
+  if (cardType === "term") questions.unshift(`这个术语在原文语境里真正解决了什么问题？`);
+  if (cardType === "counterpoint") questions.unshift("这个反驳成立的前提是什么，可能反过来被哪里挑战？");
+  if (request.context.visualAssets?.length) questions.push("这张图片或视频画面里哪些视觉结构值得单独沉淀？");
+  return Array.from(new Set(questions)).slice(0, 4);
+}
+
+function buildRetrievalHints(request: CaptureRequest, topics: string[], cardType: TwyrCardType): string[] {
+  return buildRetrievalHintsFromParts(request.context, topics, cardType, request.question || request.note);
+}
+
+function buildRetrievalHintsFromParts(
+  context: ReadingContext,
+  topics: string[],
+  type: TwyrCardType | "source",
+  userFocus?: string,
+): string[] {
+  return compactList([
+    `当用户讨论 ${topics.slice(0, 4).join("、") || context.source.title} 时，优先检索本记录。`,
+    context.source.site ? `来源站点：${context.source.site}` : undefined,
+    userFocus ? `用户关注入口：${normalizeInlineText(userFocus, 120)}` : undefined,
+    `资料类型：${type}`,
+  ]);
+}
+
+function extractDigestTopics(parts: Array<string | undefined>): string[] {
+  const topics = new Set<string>();
+  const text = parts.filter(Boolean).join("\n");
+  for (const heading of text.match(/^#{1,3}\s+(.+)$/gm) ?? []) {
+    addTopic(topics, heading.replace(/^#{1,3}\s+/, ""));
+  }
+  for (const phrase of text.match(/[\u4e00-\u9fff]{2,12}/g) ?? []) {
+    addTopic(topics, phrase.length > 8 ? phrase.slice(0, 8) : phrase);
+  }
+  for (const token of text.toLowerCase().match(/[a-z][a-z0-9_-]{2,}/g) ?? []) {
+    addTopic(topics, token);
+  }
+  return Array.from(topics).slice(0, 8);
+}
+
+function addTopic(topics: Set<string>, value: string): void {
+  const topic = normalizeTopic(value);
+  if (!topic || topic.length < 2) return;
+  if (DIGEST_STOP_WORDS.has(topic.toLowerCase())) return;
+  topics.add(topic);
+}
+
+function normalizeTopic(value: string): string {
+  return normalizeInlineText(value, 24)
+    .replace(/^[-*#\s]+/, "")
+    .replace(/[，。！？、；：,.!?;:()[\]{}"'“”‘’]+$/g, "")
+    .trim();
+}
+
+function firstUsefulText(...values: Array<string | undefined>): string {
+  return values.map((value) => normalizeInlineText(value, 180)).find(Boolean) ?? "";
+}
+
+function normalizeInlineText(value: string | undefined, maxChars: number): string {
+  return trimText((value ?? "").replace(/\s+/g, " ").trim(), maxChars).replace(/\n+/g, " ");
+}
+
+function compactList(values: Array<string | undefined>): string[] {
+  return values.map((value) => value?.trim() ?? "").filter(Boolean);
+}
+
+function formatList(values: string[]): string {
+  return values.map((value) => `- ${value}`).join("\n");
+}
+
+const DIGEST_STOP_WORDS = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "that",
+  "this",
+  "from",
+  "http",
+  "https",
+  "www",
+]);
 
 function buildVaultReadme(): string {
   return [
@@ -332,6 +565,12 @@ function buildSchemaDoc(): string {
     "- `term`：术语卡。",
     "- `quote`：摘录卡。",
     "",
+    "## 知识消化字段",
+    "",
+    "- `digestSummary`：一句话摘要，供快速检索和列表浏览。",
+    "- `digestTopics`：主题线索，供 Agent 判断是否调用本记录。",
+    "- `知识消化`：正文中的结构化整理，包括摘要、兴趣点、后续问题和检索提示。",
+    "",
   ].join("\n");
 }
 
@@ -359,9 +598,53 @@ function buildRetrievalSkill(): string {
 }
 
 function buildCardTemplate(): string {
-  return "# {{title}}\n\n来源：{{sourceUrl}}\n\n## 原文\n\n{{quote}}\n\n## 我的连接\n\n{{note}}\n";
+  return [
+    "# {{title}}",
+    "",
+    "来源：{{sourceUrl}}",
+    "",
+    "## 知识消化",
+    "",
+    "### 一句话摘要",
+    "",
+    "{{digestSummary}}",
+    "",
+    "### 主题线索",
+    "",
+    "{{digestTopics}}",
+    "",
+    "### 与我产生连接的点",
+    "",
+    "{{interestPoints}}",
+    "",
+    "## 原文",
+    "",
+    "{{quote}}",
+    "",
+    "## 我的记录",
+    "",
+    "{{note}}",
+    "",
+  ].join("\n");
 }
 
 function buildSourceTemplate(): string {
-  return "# {{sourceTitle}}\n\n来源：{{sourceUrl}}\n\n## 摘要\n\n{{summary}}\n\n## 原文\n\n{{content}}\n";
+  return [
+    "# {{sourceTitle}}",
+    "",
+    "来源：{{sourceUrl}}",
+    "",
+    "## 摘要",
+    "",
+    "{{summary}}",
+    "",
+    "## 知识消化",
+    "",
+    "{{digest}}",
+    "",
+    "## 原文",
+    "",
+    "{{content}}",
+    "",
+  ].join("\n");
 }
