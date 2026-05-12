@@ -969,15 +969,24 @@ function buildShell(): string {
 
       .topbar {
         display: grid;
-        gap: 7px;
-        padding: 9px 10px 8px;
+        gap: 6px;
+        padding: 8px 9px 7px;
         border-bottom: 1px solid rgba(17, 24, 39, 0.06);
+      }
+
+      .topbar-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
       }
 
       .drag-handle {
         display: flex;
         align-items: center;
         justify-content: space-between;
+        flex: 1;
+        min-width: 0;
         min-height: 20px;
         cursor: grab;
         user-select: none;
@@ -988,6 +997,9 @@ function buildShell(): string {
       }
 
       .brand {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         font-size: 12px;
         font-weight: 760;
         letter-spacing: 0;
@@ -1155,11 +1167,37 @@ function buildShell(): string {
         gap: 8px;
       }
 
-      .dock-settings {
+      .topbar-tools {
         display: flex;
-        flex-wrap: wrap;
         align-items: center;
-        gap: 6px;
+        justify-content: flex-end;
+        gap: 5px;
+        flex: none;
+      }
+
+      .topbar-tools select {
+        min-height: 30px;
+        border-radius: 8px;
+        padding: 0 22px 0 8px;
+        color: #374151;
+        font-size: 12px;
+      }
+
+      .model-select {
+        width: 66px;
+      }
+
+      .reasoning-select {
+        width: 50px;
+      }
+
+      .topbar-tools .icon-button {
+        min-height: 30px;
+        min-width: 30px;
+        width: 30px;
+        border-radius: 8px;
+        color: #374151;
+        font-size: 15px;
       }
 
       .history-panel {
@@ -1216,9 +1254,13 @@ function buildShell(): string {
         padding: 8px 2px;
       }
 
-      .fold-button {
-        padding: 5px 9px;
-        min-height: 32px;
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
       }
 
       .secondary-actions,
@@ -1324,6 +1366,11 @@ function buildShell(): string {
           color: #f8fafc;
         }
 
+        .topbar-tools select,
+        .topbar-tools .icon-button {
+          color: #f8fafc;
+        }
+
         .message-body {
           color: #f8fafc;
         }
@@ -1373,24 +1420,27 @@ function buildShell(): string {
       </div>
       <div class="expanded" role="dialog" aria-label="Think Anytime 对话 Dock">
         <div class="topbar">
-          <div class="drag-handle" data-role="drag-handle">
-            <span class="brand">Think Anytime</span>
-            <span class="mode" data-role="mode-label">极速默认</span>
+          <div class="topbar-row">
+            <div class="drag-handle" data-role="drag-handle">
+              <span class="brand">Think Anytime</span>
+              <span class="mode visually-hidden" data-role="mode-label">极速默认</span>
+            </div>
+            <div class="topbar-tools" aria-label="Dock 工具栏">
+              <select class="model-select" data-role="model" title="Codex 模型" aria-label="Codex 模型">
+                <option value="gpt-5.5">5.5</option>
+                <option value="gpt-5.4">5.4</option>
+                <option value="gpt-5.4-mini">mini</option>
+              </select>
+              <select class="reasoning-select" data-role="reasoning" title="思考强度" aria-label="思考强度">
+                <option value="fast">⚡</option>
+                <option value="xhigh">xH</option>
+              </select>
+              <button class="icon-button" type="button" data-action="history" title="历史" aria-label="历史">◷</button>
+              <button class="icon-button" type="button" data-action="new" title="新对话" aria-label="新对话">＋</button>
+              <button class="icon-button" type="button" data-action="collapse" title="折叠" aria-label="折叠">⌄</button>
+            </div>
           </div>
           <div class="chips" data-role="context-chips"></div>
-          <div class="dock-settings" aria-label="Codex 模型设置">
-            <select data-role="model" title="Codex 模型">
-              <option value="gpt-5.5">gpt-5.5</option>
-              <option value="gpt-5.4">gpt-5.4</option>
-              <option value="gpt-5.4-mini">gpt-5.4-mini</option>
-            </select>
-            <select data-role="reasoning" title="思考强度">
-              <option value="fast">极速</option>
-              <option value="xhigh">xhigh</option>
-            </select>
-            <button class="fold-button" type="button" data-action="history">历史</button>
-            <button class="fold-button" type="button" data-action="collapse">折叠</button>
-          </div>
         </div>
         <div class="history-panel" data-role="history-panel" hidden></div>
         <div class="messages" data-role="messages" aria-live="polite"></div>
@@ -1404,7 +1454,6 @@ function buildShell(): string {
               <button class="tool-button" type="button" data-action="expand">展开</button>
             </div>
             <div class="primary-actions">
-              <button class="tool-button" type="button" data-action="new">新对话</button>
               <button class="tool-button" type="button" data-action="retry" hidden>重试</button>
               <button class="send-button" type="button" data-action="send">发送</button>
             </div>
