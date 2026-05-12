@@ -7,10 +7,12 @@ import type {
   ReadingContext,
   RetrieveResponse,
   SaveRecommendation,
+  TwyrModelReasoningEffort,
   TwyrCardType,
   TwyrContextScope,
   TwyrConversationMessage,
 } from "@twyr/shared";
+import { DEFAULT_CODEX_MODEL } from "@twyr/shared";
 import type { PendingAction, RuntimeMessage } from "./messages.js";
 
 interface InlineBubbleOptions {
@@ -20,6 +22,7 @@ interface InlineBubbleOptions {
 
 type InlineRole = "user" | "assistant" | "system";
 type DockState = "collapsed" | "mini" | "expanded";
+type DockReasoningPreset = "fast" | "xhigh";
 
 interface InlineMessage {
   role: InlineRole;
@@ -36,6 +39,8 @@ interface DockPosition {
 interface PersistedDockState {
   state?: DockState;
   position?: DockPosition;
+  model?: string;
+  reasoningPreset?: DockReasoningPreset;
 }
 
 type InlineApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -53,6 +58,8 @@ let currentContext: ReadingContext | undefined;
 let messages: InlineMessage[] = [];
 let dockState: DockState = "collapsed";
 let dockPosition: DockPosition | undefined;
+let dockModel = DEFAULT_CODEX_MODEL;
+let dockReasoningPreset: DockReasoningPreset = "fast";
 let lastQuestion = "";
 let lastAnswer = "";
 let lastThreadPath = "";
@@ -84,6 +91,22 @@ export function openInlineBubble(options: InlineBubbleOptions): void {
   setDockState("expanded", options);
   options.showToast("Think Anytime：上下文已附加");
   getTextarea("question")?.focus();
+}
+
+export function toggleInlineDock(options: InlineBubbleOptions): void {
+  if (dockState === "collapsed") {
+    openInlineBubble(options);
+    return;
+  }
+  setDockState("collapsed", options);
+}
+
+export function attachContextToInlineDock(options: InlineBubbleOptions): void {
+  ensureBubble(options);
+  currentContext = options.captureContext("selection");
+  logCaptureDetails(currentContext);
+  setDockState(dockState === "collapsed" ? "mini" : dockState, options);
+  options.showToast("Think Anytime：上下文已添加到 Dock");
 }
 
 export async function quickSaveInlineSelection(options: InlineBubbleOptions): Promise<void> {
@@ -120,6 +143,8 @@ function ensureBubble(options: InlineBubbleOptions): void {
   const persisted = loadDockState();
   dockState = persisted.state ?? "collapsed";
   dockPosition = persisted.position;
+  dockModel = persisted.model || DEFAULT_CODEX_MODEL;
+  dockReasoningPreset = persisted.reasoningPreset === "xhigh" ? "xhigh" : "fast";
   host = document.createElement("div");
   host.id = HOST_ID;
   Object.assign(host.style, {
@@ -175,7 +200,21 @@ function bindEvents(options: InlineBubbleOptions): void {
     setDockState("expanded", options);
     getTextarea("question")?.focus();
   });
-  getButton("collapse")?.addEventListener("click", () => setDockState("collapsed", options));
+  getButtons("collapse").forEach((button) => {
+    button.addEventListener("click", () => setDockState("collapsed", options));
+  });
+  getSelect("model")?.addEventListener("change", (event) => {
+    const select = event.currentTarget as HTMLSelectElement;
+    dockModel = select.value || DEFAULT_CODEX_MODEL;
+    saveDockState();
+    renderBubble(options);
+  });
+  getSelect("reasoning")?.addEventListener("change", (event) => {
+    const select = event.currentTarget as HTMLSelectElement;
+    dockReasoningPreset = select.value === "xhigh" ? "xhigh" : "fast";
+    saveDockState();
+    renderBubble(options);
+  });
   getButton("new")?.addEventListener("click", () => resetConversation(options));
   getButton("send")?.addEventListener("click", () => {
     if (isBusy) {
@@ -213,10 +252,14 @@ function renderBubble(options: InlineBubbleOptions): void {
   const promoteButton = getButton("promote");
   const retryButton = getButton("retry");
   const modeLabel = shadow.querySelector<HTMLElement>("[data-role='mode-label']");
+  const modelSelect = getSelect("model");
+  const reasoningSelect = getSelect("reasoning");
 
   if (root) root.dataset.state = dockState;
   if (chips) chips.innerHTML = renderContextChips();
-  if (modeLabel) modeLabel.textContent = isBusy ? "快速回答中" : "极速默认";
+  if (modeLabel) modeLabel.textContent = isBusy ? `${formatReasoningPreset()} 思考中` : formatReasoningPreset();
+  if (modelSelect) modelSelect.value = dockModel;
+  if (reasoningSelect) reasoningSelect.value = dockReasoningPreset;
   if (messageList) {
     messageList.innerHTML = messages.map(renderMessage).join("");
     messageList.hidden = messages.length === 0;
@@ -244,7 +287,10 @@ async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: str
   const miniTextarea = getTextarea("mini-question");
   const question = overrideQuestion?.trim() || fullTextarea?.value.trim() || miniTextarea?.value.trim() || DEFAULT_QUESTION;
   if (isBusy || !question) return;
-  if (!currentContext) currentContext = options.captureContext("selection");
+  const responseMode = dockReasoningPreset === "xhigh" ? "deep" : "fast";
+  const contextScope: TwyrContextScope = responseMode === "deep" ? "page" : "selection";
+  const modelReasoningEffort: TwyrModelReasoningEffort = dockReasoningPreset === "xhigh" ? "xhigh" : "low";
+  currentContext = prepareContextForSend(options, contextScope);
 
   const conversation = buildConversationHistory();
   const requestId = activeRequestId + 1;
@@ -264,9 +310,11 @@ async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: str
         context: currentContext,
         question,
         mode: "freeform",
-        responseMode: "fast",
-        contextScope: "selection",
+        responseMode,
+        contextScope,
         sessionId,
+        model: dockModel,
+        modelReasoningEffort,
         conversation,
       },
     });
@@ -473,6 +521,25 @@ function resetConversation(options: InlineBubbleOptions): void {
   getTextarea("question")?.focus();
 }
 
+function prepareContextForSend(options: InlineBubbleOptions, contextScope: TwyrContextScope): ReadingContext {
+  if (!currentContext || contextScope === "page") {
+    const nextContext = options.captureContext(contextScope);
+    currentContext = mergeReadingContext(nextContext, currentContext);
+  }
+  return currentContext;
+}
+
+function mergeReadingContext(nextContext: ReadingContext, previousContext: ReadingContext | undefined): ReadingContext {
+  if (!previousContext) return nextContext;
+  return {
+    ...nextContext,
+    selectionText: nextContext.selectionText || previousContext.selectionText,
+    selectedHtml: nextContext.selectedHtml || previousContext.selectedHtml,
+    surroundingText: nextContext.surroundingText || previousContext.surroundingText,
+    visualAssets: nextContext.visualAssets?.length ? nextContext.visualAssets : previousContext.visualAssets,
+  };
+}
+
 function setDockState(nextState: DockState, options?: InlineBubbleOptions, shouldRender = true): void {
   dockState = nextState;
   dockPosition = clampPosition(dockPosition ?? defaultPosition(nextState), getDockWidth(nextState));
@@ -618,6 +685,14 @@ function getButton(action: string): HTMLButtonElement | null {
   return shadow?.querySelector<HTMLButtonElement>(`[data-action='${action}']`) ?? null;
 }
 
+function getButtons(action: string): HTMLButtonElement[] {
+  return Array.from(shadow?.querySelectorAll<HTMLButtonElement>(`[data-action='${action}']`) ?? []);
+}
+
+function getSelect(role: "model" | "reasoning"): HTMLSelectElement | null {
+  return shadow?.querySelector<HTMLSelectElement>(`[data-role='${role}']`) ?? null;
+}
+
 function bindFeedbackButtons(options: InlineBubbleOptions): void {
   shadow?.querySelectorAll<HTMLButtonElement>("[data-feedback-rating]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -693,7 +768,7 @@ function buildShell(): string {
 
       .mini-row {
         display: grid;
-        grid-template-columns: 1fr auto auto;
+        grid-template-columns: 1fr auto auto auto;
         gap: 6px;
         align-items: center;
       }
@@ -837,6 +912,7 @@ function buildShell(): string {
       }
 
       input,
+      select,
       textarea {
         width: 100%;
         border: 1px solid rgba(17, 24, 39, 0.1);
@@ -851,6 +927,13 @@ function buildShell(): string {
       input {
         min-height: 38px;
         padding: 0 10px;
+      }
+
+      select {
+        width: auto;
+        min-height: 32px;
+        padding: 0 8px;
+        font-size: 12px;
       }
 
       textarea {
@@ -880,6 +963,18 @@ function buildShell(): string {
         align-items: center;
         justify-content: space-between;
         gap: 8px;
+      }
+
+      .dock-settings {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .fold-button {
+        padding: 5px 9px;
+        min-height: 32px;
       }
 
       .secondary-actions,
@@ -969,6 +1064,7 @@ function buildShell(): string {
         .chip,
         button,
         input,
+        select,
         textarea,
         .message {
           border-color: rgba(226, 232, 240, 0.12);
@@ -1019,6 +1115,7 @@ function buildShell(): string {
         <div class="mini-row">
           <input data-role="mini-question" placeholder="${DEFAULT_QUESTION}" />
           <button class="icon-button" type="button" data-action="expand-dock" aria-label="展开">↗</button>
+          <button class="icon-button" type="button" data-action="collapse" aria-label="折叠">−</button>
           <button class="send-button" type="button" data-action="mini-send">发送</button>
         </div>
       </div>
@@ -1029,6 +1126,18 @@ function buildShell(): string {
             <span class="mode" data-role="mode-label">极速默认</span>
           </div>
           <div class="chips" data-role="context-chips"></div>
+          <div class="dock-settings" aria-label="Codex 模型设置">
+            <select data-role="model" title="Codex 模型">
+              <option value="gpt-5.5">gpt-5.5</option>
+              <option value="gpt-5.4">gpt-5.4</option>
+              <option value="gpt-5.4-mini">gpt-5.4-mini</option>
+            </select>
+            <select data-role="reasoning" title="思考强度">
+              <option value="fast">极速</option>
+              <option value="xhigh">xhigh</option>
+            </select>
+            <button class="fold-button" type="button" data-action="collapse">折叠</button>
+          </div>
         </div>
         <div class="messages" data-role="messages" aria-live="polite"></div>
         <div class="composer">
@@ -1043,7 +1152,6 @@ function buildShell(): string {
             <div class="primary-actions">
               <button class="tool-button" type="button" data-action="new">新对话</button>
               <button class="tool-button" type="button" data-action="retry" hidden>重试</button>
-              <button class="tool-button icon-button" type="button" data-action="collapse" aria-label="折叠 Think Anytime Dock">×</button>
               <button class="send-button" type="button" data-action="send">发送</button>
             </div>
           </div>
@@ -1085,6 +1193,8 @@ function saveDockState(): void {
       JSON.stringify({
         state: dockState,
         position: dockPosition,
+        model: dockModel,
+        reasoningPreset: dockReasoningPreset,
       } satisfies PersistedDockState),
     );
   } catch {
@@ -1116,6 +1226,10 @@ function buildSaveButtonTitle(): string {
   if (!lastSaveRecommendation) return "保存到 Think Anytime";
   const level = lastSaveRecommendation.level === "source" ? "card" : lastSaveRecommendation.level;
   return `按 AI 建议保存为 ${level}/${lastSaveRecommendation.cardType}`;
+}
+
+function formatReasoningPreset(): string {
+  return dockReasoningPreset === "xhigh" ? `${dockModel} · xhigh` : `${dockModel} · 极速`;
 }
 
 function escapeHtml(value: string): string {

@@ -27,6 +27,8 @@ export type RuntimeMessage =
   | { type: "TWYR_SET_TOOLBAR_ENABLED"; enabled: boolean }
   | { type: "TWYR_TOGGLE_TOOLBAR" }
   | { type: "TWYR_OPEN_INLINE" }
+  | { type: "TWYR_TOGGLE_DOCK" }
+  | { type: "TWYR_ATTACH_CONTEXT" }
   | { type: "TWYR_INLINE_QUICK_SAVE" }
   | { type: "TWYR_CAPTURE_VISUALS"; context: ReadingContext; sourceTabId?: number }
   | { type: "TWYR_INLINE_ASK"; body: AskRequest }

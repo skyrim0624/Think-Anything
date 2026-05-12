@@ -50,7 +50,10 @@ chrome.commands.onCommand.addListener((command) => {
       await openStandalonePanel(tab.id, { kind: "ask", mode: "explain", createdAt: Date.now() });
     }
     if (command === "open_inline") {
-      await sendContentCommand(tab.id, { type: "TWYR_OPEN_INLINE" });
+      await sendContentCommand(tab.id, { type: "TWYR_TOGGLE_DOCK" });
+    }
+    if (command === "attach_context") {
+      await sendContentCommand(tab.id, { type: "TWYR_ATTACH_CONTEXT" });
     }
     if (command === "quick_capture") {
       await sendContentCommand(tab.id, { type: "TWYR_INLINE_QUICK_SAVE" });

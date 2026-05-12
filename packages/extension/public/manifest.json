@@ -49,10 +49,17 @@
   "commands": {
     "open_inline": {
       "suggested_key": {
-        "default": "Alt+S",
-        "mac": "Alt+S"
+        "default": "Alt+A",
+        "mac": "Alt+A"
       },
-      "description": "展开 Think Anytime Dock 并附加当前上下文"
+      "description": "唤出或关闭 Think Anytime Dock"
+    },
+    "attach_context": {
+      "suggested_key": {
+        "default": "Alt+D",
+        "mac": "Alt+D"
+      },
+      "description": "把当前选区或画面添加到 Think Anytime Dock 上下文"
     },
     "open_twyr": {
       "suggested_key": {

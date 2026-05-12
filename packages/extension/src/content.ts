@@ -1,5 +1,12 @@
 import type { ReadingContext, TwyrContextScope, VisualAsset, VisualRect } from "@twyr/shared";
-import { closeInlineBubble, ensureInlineDock, openInlineBubble, quickSaveInlineSelection } from "./inline-bubble.js";
+import {
+  attachContextToInlineDock,
+  closeInlineBubble,
+  ensureInlineDock,
+  openInlineBubble,
+  quickSaveInlineSelection,
+  toggleInlineDock,
+} from "./inline-bubble.js";
 import type { RuntimeMessage } from "./messages.js";
 
 const TOOLBAR_ID = "twyr-selection-toolbar";
@@ -30,6 +37,16 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
   }
   if (message.type === "TWYR_OPEN_INLINE") {
     openInlineBubble({ captureContext: captureReadingContext, showToast });
+    sendResponse({ ok: true });
+    return true;
+  }
+  if (message.type === "TWYR_TOGGLE_DOCK") {
+    toggleInlineDock({ captureContext: captureReadingContext, showToast });
+    sendResponse({ ok: true });
+    return true;
+  }
+  if (message.type === "TWYR_ATTACH_CONTEXT") {
+    attachContextToInlineDock({ captureContext: captureReadingContext, showToast });
     sendResponse({ ok: true });
     return true;
   }
@@ -86,11 +103,18 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (isInlineBubbleEvent(event)) return;
-  if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.code === "KeyS") {
+  if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.code === "KeyA") {
     if (event.target instanceof Element && isEditableElement(event.target)) return;
     event.preventDefault();
     event.stopPropagation();
-    openInlineBubble({ captureContext: captureReadingContext, showToast });
+    toggleInlineDock({ captureContext: captureReadingContext, showToast });
+    return;
+  }
+  if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.code === "KeyD") {
+    if (event.target instanceof Element && isEditableElement(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    attachContextToInlineDock({ captureContext: captureReadingContext, showToast });
     return;
   }
   if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.code === "KeyV") {
