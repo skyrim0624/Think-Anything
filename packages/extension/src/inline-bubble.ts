@@ -43,14 +43,41 @@ interface PersistedDockState {
   reasoningPreset?: DockReasoningPreset;
 }
 
+interface StoredDockMessage {
+  role: InlineRole;
+  content: string;
+  feedbackRating?: FeedbackRating;
+}
+
+interface StoredDockConversation {
+  id: string;
+  sessionId: string;
+  title: string;
+  sourceUrl: string;
+  site?: string;
+  createdAt: number;
+  updatedAt: number;
+  threadPath?: string;
+  context?: ReadingContext;
+  messages: StoredDockMessage[];
+  lastQuestion?: string;
+  lastAnswer?: string;
+  lastSaveRecommendation?: SaveRecommendation;
+  model?: string;
+  reasoningPreset?: DockReasoningPreset;
+}
+
 type InlineApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
 const HOST_ID = "twyr-inline-bubble-host";
 const DOCK_STORAGE_KEY = "twyr.dock.state.v1";
+const CONVERSATION_HISTORY_KEY = "twyr.dock.conversations.v1";
 const EXPANDED_WIDTH = 430;
 const MINI_WIDTH = 360;
 const COLLAPSED_WIDTH = 62;
 const DEFAULT_QUESTION = "解释这段内容，并指出它是否值得保存。";
+const MAX_HISTORY_SESSIONS = 18;
+const MAX_STORED_MESSAGES = 18;
 
 let host: HTMLDivElement | undefined;
 let shadow: ShadowRoot | undefined;
@@ -60,6 +87,8 @@ let dockState: DockState = "collapsed";
 let dockPosition: DockPosition | undefined;
 let dockModel = DEFAULT_CODEX_MODEL;
 let dockReasoningPreset: DockReasoningPreset = "fast";
+let historySessions: StoredDockConversation[] = [];
+let historyOpen = false;
 let lastQuestion = "";
 let lastAnswer = "";
 let lastThreadPath = "";
@@ -155,6 +184,7 @@ function ensureBubble(options: InlineBubbleOptions): void {
   shadow.innerHTML = buildShell();
   bindEvents(options);
   document.documentElement.appendChild(host);
+  void loadConversationHistory(options);
   if (!resizeBound) {
     resizeBound = true;
     window.addEventListener("resize", () => {
@@ -215,6 +245,10 @@ function bindEvents(options: InlineBubbleOptions): void {
     saveDockState();
     renderBubble(options);
   });
+  getButton("history")?.addEventListener("click", () => {
+    historyOpen = !historyOpen;
+    renderBubble(options);
+  });
   getButton("new")?.addEventListener("click", () => resetConversation(options));
   getButton("send")?.addEventListener("click", () => {
     if (isBusy) {
@@ -254,6 +288,7 @@ function renderBubble(options: InlineBubbleOptions): void {
   const modeLabel = shadow.querySelector<HTMLElement>("[data-role='mode-label']");
   const modelSelect = getSelect("model");
   const reasoningSelect = getSelect("reasoning");
+  const historyPanel = shadow.querySelector<HTMLElement>("[data-role='history-panel']");
 
   if (root) root.dataset.state = dockState;
   if (chips) chips.innerHTML = renderContextChips();
@@ -265,6 +300,11 @@ function renderBubble(options: InlineBubbleOptions): void {
     messageList.hidden = messages.length === 0;
     messageList.scrollTop = messageList.scrollHeight;
     bindFeedbackButtons(options);
+  }
+  if (historyPanel) {
+    historyPanel.innerHTML = renderHistoryPanel();
+    historyPanel.hidden = !historyOpen;
+    bindHistoryButtons(options);
   }
   if (sendButton) sendButton.textContent = isBusy ? "停止" : "发送";
   if (miniSendButton) miniSendButton.textContent = isBusy ? "停止" : "发送";
@@ -331,6 +371,7 @@ async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: str
     if (requestId === activeRequestId) {
       isBusy = false;
       renderBubble(options);
+      void saveCurrentConversation();
       getTextarea("question")?.focus();
     }
   }
@@ -342,6 +383,7 @@ function stopActiveRequest(options: InlineBubbleOptions): void {
   isBusy = false;
   messages.push({ role: "system", content: "已停止等待；如果原请求稍后返回，本窗口会忽略那次结果。" });
   renderBubble(options);
+  void saveCurrentConversation();
   getTextarea("question")?.focus();
 }
 
@@ -372,6 +414,7 @@ async function saveCurrentThread(options: InlineBubbleOptions): Promise<void> {
     });
     lastSavedAt = Date.now();
     messages.push({ role: "system", content: `已保存为 ${response.level}/${response.cardType}：${response.path}` });
+    void saveCurrentConversation();
     window.setTimeout(() => renderBubble(options), 1700);
   } catch (error) {
     messages.push({ role: "system", content: error instanceof Error ? error.message : String(error) });
@@ -427,6 +470,7 @@ async function retrieveRelatedNotes(options: InlineBubbleOptions): Promise<void>
           .join("\n\n")
       : "没有找到明显相关的旧笔记。";
     messages.push({ role: "assistant", content });
+    void saveCurrentConversation();
   } catch (error) {
     messages.push({ role: "system", content: error instanceof Error ? error.message : String(error) });
   } finally {
@@ -462,6 +506,7 @@ async function promoteCurrentSource(options: InlineBubbleOptions): Promise<void>
       role: "system",
       content: `全文已入库：${response.sourcePath}\n索引已更新：${response.mocPath}`,
     });
+    void saveCurrentConversation();
   } catch (error) {
     messages.push({ role: "system", content: error instanceof Error ? error.message : String(error) });
   } finally {
@@ -507,6 +552,7 @@ async function sendInlineFeedback(
 }
 
 function resetConversation(options: InlineBubbleOptions): void {
+  void saveCurrentConversation();
   messages = [];
   lastQuestion = "";
   lastAnswer = "";
@@ -517,6 +563,7 @@ function resetConversation(options: InlineBubbleOptions): void {
   isBusy = false;
   sessionId = createSessionId();
   currentContext = options.captureContext("selection");
+  historyOpen = false;
   renderBubble(options);
   getTextarea("question")?.focus();
 }
@@ -677,6 +724,25 @@ function renderContextChips(): string {
   return chips.join("");
 }
 
+function renderHistoryPanel(): string {
+  if (!historySessions.length) {
+    return '<div class="history-empty">还没有可继续的历史对话。</div>';
+  }
+  const rows = historySessions
+    .slice(0, MAX_HISTORY_SESSIONS)
+    .map((conversation) => {
+      const activeClass = conversation.sessionId === sessionId ? " history-item-active" : "";
+      const lastMessage = conversation.messages.at(-1)?.content || conversation.title;
+      return `<button class="history-item${activeClass}" type="button" data-history-id="${escapeHtml(conversation.id)}">
+        <span class="history-title">${escapeHtml(conversation.title)}</span>
+        <span class="history-meta">${escapeHtml(formatHistoryTime(conversation.updatedAt))}${conversation.site ? ` · ${escapeHtml(conversation.site)}` : ""}</span>
+        <span class="history-snippet">${escapeHtml(trimInlineText(lastMessage, 86))}</span>
+      </button>`;
+    })
+    .join("");
+  return `<div class="history-list">${rows}</div>`;
+}
+
 function getTextarea(role: "question" | "mini-question"): HTMLTextAreaElement | HTMLInputElement | null {
   return shadow?.querySelector<HTMLTextAreaElement | HTMLInputElement>(`[data-role='${role}']`) ?? null;
 }
@@ -702,6 +768,130 @@ function bindFeedbackButtons(options: InlineBubbleOptions): void {
       void sendInlineFeedback(options, messageIndex, rating);
     });
   });
+}
+
+function bindHistoryButtons(options: InlineBubbleOptions): void {
+  shadow?.querySelectorAll<HTMLButtonElement>("[data-history-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.dataset.historyId;
+      if (id) restoreConversation(id, options);
+    });
+  });
+}
+
+async function loadConversationHistory(options: InlineBubbleOptions): Promise<void> {
+  try {
+    const stored = await chrome.storage.local.get(CONVERSATION_HISTORY_KEY);
+    const value = stored[CONVERSATION_HISTORY_KEY];
+    historySessions = normalizeStoredConversations(value);
+    renderBubble(options);
+  } catch (error) {
+    console.warn("[Think Anytime] 无法读取历史对话", error);
+  }
+}
+
+async function saveCurrentConversation(): Promise<void> {
+  if (!messages.length || !currentContext) return;
+  const now = Date.now();
+  const existing = historySessions.find((conversation) => conversation.sessionId === sessionId);
+  const record: StoredDockConversation = {
+    id: existing?.id || sessionId,
+    sessionId,
+    title: currentContext.source.title || "未命名阅读对话",
+    sourceUrl: currentContext.source.url,
+    site: currentContext.source.site,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    threadPath: lastThreadPath || existing?.threadPath,
+    context: sanitizeContextForHistory(currentContext),
+    messages: messages.slice(-MAX_STORED_MESSAGES).map((message) => ({
+      role: message.role,
+      content: trimInlineText(message.content, 4000),
+      feedbackRating: message.feedbackRating,
+    })),
+    lastQuestion: lastQuestion || existing?.lastQuestion,
+    lastAnswer: trimInlineText(lastAnswer || existing?.lastAnswer || "", 4000),
+    lastSaveRecommendation,
+    model: dockModel,
+    reasoningPreset: dockReasoningPreset,
+  };
+  historySessions = [record, ...historySessions.filter((conversation) => conversation.sessionId !== sessionId)]
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, MAX_HISTORY_SESSIONS);
+  try {
+    await chrome.storage.local.set({ [CONVERSATION_HISTORY_KEY]: historySessions });
+  } catch (error) {
+    console.warn("[Think Anytime] 无法保存历史对话", error);
+  }
+}
+
+function restoreConversation(id: string, options: InlineBubbleOptions): void {
+  const conversation = historySessions.find((item) => item.id === id);
+  if (!conversation) return;
+  activeRequestId += 1;
+  isBusy = false;
+  sessionId = conversation.sessionId;
+  currentContext = conversation.context;
+  lastQuestion = conversation.lastQuestion || "";
+  lastAnswer = conversation.lastAnswer || "";
+  lastThreadPath = conversation.threadPath || "";
+  lastSaveRecommendation = conversation.lastSaveRecommendation;
+  dockModel = conversation.model || dockModel;
+  dockReasoningPreset = conversation.reasoningPreset === "xhigh" ? "xhigh" : "fast";
+  messages = conversation.messages.map((message) => ({
+    role: message.role,
+    content: message.content,
+    feedbackRating: message.feedbackRating,
+  }));
+  historyOpen = false;
+  setDockState("expanded", options);
+  getTextarea("question")?.focus();
+}
+
+function normalizeStoredConversations(value: unknown): StoredDockConversation[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is StoredDockConversation => {
+      if (!item || typeof item !== "object") return false;
+      const record = item as Partial<StoredDockConversation>;
+      return Boolean(record.id && record.sessionId && record.title && Array.isArray(record.messages));
+    })
+    .map((item) => ({
+      ...item,
+      messages: item.messages
+        .filter((message) => message.role === "user" || message.role === "assistant" || message.role === "system")
+        .map((message) => ({
+          role: message.role,
+          content: String(message.content || ""),
+          feedbackRating: message.feedbackRating,
+        }))
+        .slice(-MAX_STORED_MESSAGES),
+    }))
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, MAX_HISTORY_SESSIONS);
+}
+
+function sanitizeContextForHistory(context: ReadingContext): ReadingContext {
+  return {
+    source: context.source,
+    selectionText: trimInlineText(context.selectionText, 2400),
+    surroundingText: trimInlineText(context.surroundingText, 2600),
+    headings: context.headings?.slice(0, 16),
+    highlights: context.highlights?.slice(0, 8),
+    viewport: context.viewport,
+    visualAssets: context.visualAssets?.map((asset) => ({
+      id: asset.id,
+      type: asset.type,
+      label: asset.label,
+      rect: asset.rect,
+      sourceUrl: asset.sourceUrl,
+      alt: asset.alt,
+      mimeType: asset.mimeType,
+      vaultPath: asset.vaultPath,
+      capturedAt: asset.capturedAt,
+    })),
+    capturedAt: context.capturedAt,
+  };
 }
 
 function buildShell(): string {
@@ -972,6 +1162,60 @@ function buildShell(): string {
         gap: 6px;
       }
 
+      .history-panel {
+        border-top: 1px solid rgba(17, 24, 39, 0.06);
+        background: rgba(251, 252, 252, 0.72);
+        padding: 7px 10px;
+      }
+
+      .history-panel[hidden] {
+        display: none;
+      }
+
+      .history-list {
+        display: grid;
+        gap: 6px;
+        max-height: 174px;
+        overflow: auto;
+      }
+
+      .history-item {
+        display: grid;
+        gap: 2px;
+        width: 100%;
+        min-height: 0;
+        padding: 8px 9px;
+        text-align: left;
+      }
+
+      .history-item-active {
+        border-color: rgba(17, 24, 39, 0.28);
+      }
+
+      .history-title,
+      .history-meta,
+      .history-snippet {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .history-title {
+        font-size: 12px;
+        font-weight: 680;
+      }
+
+      .history-meta,
+      .history-snippet,
+      .history-empty {
+        color: #6b7280;
+        font-size: 11px;
+      }
+
+      .history-empty {
+        padding: 8px 2px;
+      }
+
       .fold-button {
         padding: 5px 9px;
         min-height: 32px;
@@ -1056,8 +1300,16 @@ function buildShell(): string {
           border-color: rgba(226, 232, 240, 0.1);
         }
 
+        .history-panel {
+          border-color: rgba(226, 232, 240, 0.1);
+          background: rgba(248, 250, 252, 0.04);
+        }
+
         .mode,
-        .message-role {
+        .message-role,
+        .history-meta,
+        .history-snippet,
+        .history-empty {
           color: #aeb7c2;
         }
 
@@ -1136,9 +1388,11 @@ function buildShell(): string {
               <option value="fast">极速</option>
               <option value="xhigh">xhigh</option>
             </select>
+            <button class="fold-button" type="button" data-action="history">历史</button>
             <button class="fold-button" type="button" data-action="collapse">折叠</button>
           </div>
         </div>
+        <div class="history-panel" data-role="history-panel" hidden></div>
         <div class="messages" data-role="messages" aria-live="polite"></div>
         <div class="composer">
           <textarea data-role="question" placeholder="${DEFAULT_QUESTION}"></textarea>
@@ -1230,6 +1484,26 @@ function buildSaveButtonTitle(): string {
 
 function formatReasoningPreset(): string {
   return dockReasoningPreset === "xhigh" ? `${dockModel} · xhigh` : `${dockModel} · 极速`;
+}
+
+function formatHistoryTime(timestamp: number): string {
+  if (!timestamp) return "未知时间";
+  const date = new Date(timestamp);
+  const now = Date.now();
+  const diffMinutes = Math.round((now - timestamp) / 60000);
+  if (diffMinutes < 1) return "刚刚";
+  if (diffMinutes < 60) return `${diffMinutes} 分钟前`;
+  if (diffMinutes < 24 * 60) return `${Math.floor(diffMinutes / 60)} 小时前`;
+  return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(
+    date.getMinutes(),
+  ).padStart(2, "0")}`;
+}
+
+function trimInlineText(value: string | undefined, maxLength: number): string {
+  if (!value) return "";
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 function escapeHtml(value: string): string {
