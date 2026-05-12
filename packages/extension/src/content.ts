@@ -1,4 +1,11 @@
-import type { LinkedPageContext, ReadingContext, TwyrContextScope, VisualAsset, VisualRect } from "@twyr/shared";
+import type {
+  LinkedPageContext,
+  ReadingContext,
+  TwyrContextScope,
+  VideoTranscriptContext,
+  VisualAsset,
+  VisualRect,
+} from "@twyr/shared";
 import {
   attachContextToInlineDock,
   closeInlineBubble,
@@ -14,11 +21,24 @@ const INLINE_BUBBLE_HOST_ID = "twyr-inline-bubble-host";
 const TOAST_ID = "twyr-selection-toast";
 const STYLE_ID = "twyr-selection-style";
 const TOOLBAR_ESTIMATED_WIDTH = 304;
+interface VisualCandidate {
+  element: Element;
+  distance: number;
+  reason: string;
+}
+
 let selectionTimer: number | undefined;
 let toastTimer: number | undefined;
 let editableGuardTimer: number | undefined;
 let toolbarEnabled = false;
 let lastPointer: { x: number; y: number; time: number } | undefined;
+let lastSelectionSnapshot:
+  | {
+      text: string;
+      html: string;
+      ranges: Range[];
+    }
+  | undefined;
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
   if (message.type === "TWYR_GET_CONTEXT") {
@@ -60,6 +80,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
 });
 
 document.addEventListener("selectionchange", () => {
+  rememberReadableSelection();
   window.clearTimeout(selectionTimer);
   selectionTimer = window.setTimeout(updateToolbar, 120);
 });
@@ -129,12 +150,19 @@ ensureInlineDock({ captureContext: captureReadingContext, showToast });
 
 function captureReadingContext(scope: TwyrContextScope = "page"): ReadingContext {
   const selection = window.getSelection();
-  const selectionText = selection?.toString().trim() || "";
-  const selectedHtml = selection && selection.rangeCount > 0 ? serializeSelection(selection) : "";
+  const liveSelectionText = selection?.toString().trim() || "";
+  const selectionSnapshot = liveSelectionText ? undefined : lastSelectionSnapshot;
+  const selectionText = liveSelectionText || selectionSnapshot?.text || "";
+  const selectedHtml =
+    liveSelectionText && selection && selection.rangeCount > 0
+      ? serializeSelection(selection)
+      : selectionSnapshot?.html || "";
   const mainElement = findMainElement();
   const pageText = normalizeWhitespace(mainElement.innerText || document.body.innerText || "");
   const pageMarkdown = scope === "page" ? elementToMarkdown(mainElement) : "";
-  const visualAssets = captureVisualAssets(selection);
+  const selectedRange = getSelectedRange(selection) ?? selectionSnapshot?.ranges[0] ?? null;
+  const visualCandidates = getVisualCandidates(selectedRange);
+  const visualAssets = captureVisualAssetsFromCandidates(visualCandidates);
   return {
     source: {
       url: location.href,
@@ -162,9 +190,35 @@ function captureReadingContext(scope: TwyrContextScope = "page"): ReadingContext
       devicePixelRatio: window.devicePixelRatio || 1,
     },
     visualAssets,
-    linkedPages: extractSelectionLinks(selection, selectionText),
+    linkedPages: extractSelectionLinks(liveSelectionText ? selection : null, selectionText),
+    videoTranscripts: extractVideoTranscripts(visualCandidates),
     capturedAt: new Date().toISOString(),
   };
+}
+
+function rememberReadableSelection(): void {
+  const selection = window.getSelection();
+  const text = selection?.toString().trim() || "";
+  if (!selection || selection.isCollapsed || text.length < 2 || !selection.rangeCount) return;
+  if (isEditableSelection(selection)) return;
+  const ranges = Array.from({ length: selection.rangeCount }, (_value, index) => selection.getRangeAt(index).cloneRange());
+  if (ranges.some((range) => rangeIntersectsExtensionUi(range))) return;
+  lastSelectionSnapshot = {
+    text,
+    html: serializeSelection(selection),
+    ranges,
+  };
+}
+
+function getSelectedRange(selection: Selection | null): Range | null {
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
+  return selection.getRangeAt(0);
+}
+
+function rangeIntersectsExtensionUi(range: Range): boolean {
+  const node = range.commonAncestorContainer;
+  const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+  return Boolean(element?.closest(`#${INLINE_BUBBLE_HOST_ID}, #${TOOLBAR_ID}, #${TOAST_ID}`));
 }
 
 function extractSelectionLinks(selection: Selection | null, selectionText: string): LinkedPageContext[] {
@@ -220,11 +274,10 @@ function rememberPointer(event: PointerEvent): void {
   };
 }
 
-function captureVisualAssets(selection: Selection | null): VisualAsset[] {
-  const selectedRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+function getVisualCandidates(selectedRange: Range | null): VisualCandidate[] {
   const selectionRect = selectedRange ? toVisualRect(selectedRange.getBoundingClientRect()) : undefined;
   const roots = getVisualSearchRoots(selectedRange);
-  const candidates = new Map<Element, { element: Element; distance: number; reason: string }>();
+  const candidates = new Map<Element, VisualCandidate>();
 
   if (selectedRange && selectionRect) {
     for (const root of roots) {
@@ -249,9 +302,90 @@ function captureVisualAssets(selection: Selection | null): VisualAsset[] {
 
   return Array.from(candidates.values())
     .sort((a, b) => a.distance - b.distance)
-    .slice(0, 4)
+    .slice(0, 4);
+}
+
+function captureVisualAssets(selection: Selection | null): VisualAsset[] {
+  return captureVisualAssetsFromCandidates(getVisualCandidates(getSelectedRange(selection)));
+}
+
+function captureVisualAssetsFromCandidates(candidates: VisualCandidate[]): VisualAsset[] {
+  return candidates
     .map(({ element, reason }, index) => buildVisualAsset(element, index, reason))
     .filter((asset): asset is VisualAsset => Boolean(asset));
+}
+
+function extractVideoTranscripts(candidates: VisualCandidate[]): VideoTranscriptContext[] {
+  const transcripts: VideoTranscriptContext[] = [];
+  const seen = new Set<string>();
+  for (const { element } of candidates) {
+    const video = getVideoElement(element);
+    if (!video) continue;
+    for (const transcript of extractTextTrackTranscripts(video)) {
+      if (seen.has(transcript.id)) continue;
+      seen.add(transcript.id);
+      transcripts.push(transcript);
+    }
+    for (const transcript of extractTrackElementTranscripts(video)) {
+      if (seen.has(transcript.id)) continue;
+      seen.add(transcript.id);
+      transcripts.push(transcript);
+    }
+  }
+  return transcripts.slice(0, 4);
+}
+
+function getVideoElement(element: Element): HTMLVideoElement | null {
+  if (element instanceof HTMLVideoElement) return element;
+  return element.querySelector("video");
+}
+
+function extractTextTrackTranscripts(video: HTMLVideoElement): VideoTranscriptContext[] {
+  return Array.from(video.textTracks)
+    .map((track, index): VideoTranscriptContext | undefined => {
+      const cues = track.cues ? Array.from(track.cues) : [];
+      const text = cues.map(formatCueText).filter(Boolean).join("\n");
+      if (!text.trim()) return undefined;
+      return {
+        id: `text-track-${index + 1}-${track.language || "unknown"}`,
+        label: track.label || `内嵌字幕 ${index + 1}`,
+        language: track.language || undefined,
+        kind: track.kind,
+        text,
+        fetchedAt: new Date().toISOString(),
+      } satisfies VideoTranscriptContext;
+    })
+    .filter((track): track is VideoTranscriptContext => Boolean(track));
+}
+
+function extractTrackElementTranscripts(video: HTMLVideoElement): VideoTranscriptContext[] {
+  return Array.from(video.querySelectorAll<HTMLTrackElement>("track[src]"))
+    .map((track, index): VideoTranscriptContext | undefined => {
+      const sourceUrl = normalizeUrl(track.getAttribute("src"));
+      if (!sourceUrl) return undefined;
+      return {
+        id: `track-src-${index + 1}-${sourceUrl}`,
+        label: track.label || `字幕文件 ${index + 1}`,
+        language: track.srclang || undefined,
+        kind: track.kind || undefined,
+        sourceUrl,
+      } satisfies VideoTranscriptContext;
+    })
+    .filter((track): track is VideoTranscriptContext => Boolean(track));
+}
+
+function formatCueText(cue: TextTrackCue): string {
+  const record = cue as TextTrackCue & { text?: string };
+  const text = normalizeWhitespace(record.text || "");
+  if (!text) return "";
+  return `[${formatCueTime(cue.startTime)}] ${text}`;
+}
+
+function formatCueTime(seconds: number): string {
+  if (!Number.isFinite(seconds)) return "00:00";
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.floor(seconds % 60);
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 
 function getVisualSearchRoots(range: Range | null): Element[] {

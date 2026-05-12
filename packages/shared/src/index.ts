@@ -80,6 +80,17 @@ export interface LinkedPageContext {
   error?: string;
 }
 
+export interface VideoTranscriptContext {
+  id: string;
+  label?: string;
+  language?: string;
+  kind?: string;
+  sourceUrl?: string;
+  text?: string;
+  fetchedAt?: string;
+  error?: string;
+}
+
 export interface ReadingContext {
   source: SourceMetadata;
   selectionText?: string;
@@ -92,6 +103,7 @@ export interface ReadingContext {
   viewport?: VisualViewport;
   visualAssets?: VisualAsset[];
   linkedPages?: LinkedPageContext[];
+  videoTranscripts?: VideoTranscriptContext[];
   capturedAt: string;
 }
 

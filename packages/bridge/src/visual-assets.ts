@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ReadingContext, VisualAsset } from "@twyr/shared";
 import type { BridgeConfig } from "./config.js";
@@ -9,7 +9,7 @@ export interface PreparedVisualAsset {
   type: VisualAsset["type"];
   label: string;
   path: string;
-  vaultPath: string;
+  vaultPath?: string;
   sourceUrl?: string;
   alt?: string;
   frameIndex?: number;
@@ -20,19 +20,28 @@ export interface PreparedVisualAsset {
 export interface PreparedVisualContext {
   context: ReadingContext;
   assets: PreparedVisualAsset[];
+  cleanup: () => void;
 }
 
 const ASSET_DIRECTORY = "00-INBOX/assets";
+const TEMP_ASSET_DIRECTORY = "90-SYSTEM/tmp";
 
-export function prepareVisualContext(context: ReadingContext, config: BridgeConfig): PreparedVisualContext {
+export function prepareVisualContext(
+  context: ReadingContext,
+  config: BridgeConfig,
+  options: { storageMode?: "persistent" | "ephemeral" } = {},
+): PreparedVisualContext {
+  const storageMode = options.storageMode ?? "persistent";
+  const tempDirectory =
+    storageMode === "ephemeral" ? createTempAssetDirectory(config, "think-anytime-visual-") : undefined;
   const assets: PreparedVisualAsset[] = [];
   const visualAssets = (context.visualAssets ?? []).map((asset, index) => {
     if (!asset.dataUrl) return stripDataUrl(asset);
-    const persisted = persistVisualAsset(asset, index, context, config);
+    const persisted = persistVisualAsset(asset, index, context, config, storageMode, tempDirectory);
     assets.push(persisted);
     return {
       ...stripDataUrl(asset),
-      vaultPath: persisted.vaultPath,
+      ...(persisted.vaultPath ? { vaultPath: persisted.vaultPath } : {}),
       mimeType: asset.mimeType ?? "image/jpeg",
     };
   });
@@ -43,6 +52,11 @@ export function prepareVisualContext(context: ReadingContext, config: BridgeConf
       visualAssets,
     },
     assets,
+    cleanup: () => {
+      if (tempDirectory) {
+        rmSync(tempDirectory, { recursive: true, force: true });
+      }
+    },
   };
 }
 
@@ -51,15 +65,21 @@ function persistVisualAsset(
   index: number,
   context: ReadingContext,
   config: BridgeConfig,
+  storageMode: "persistent" | "ephemeral",
+  tempDirectory: string | undefined,
 ): PreparedVisualAsset {
   const parsed = parseDataUrl(asset.dataUrl);
   const extension = extensionFromMime(parsed.mimeType);
   const sourceSlug = slugify(context.source.title, "visual").slice(0, 36);
   const hash = shortHash(`${context.source.url}${asset.id}${asset.label}${asset.dataUrl?.slice(0, 200)}${Date.now()}`);
   const fileName = `${todayPathDate()}-${sourceSlug}-${index + 1}-${hash}.${extension}`;
-  const vaultPath = `${ASSET_DIRECTORY}/${fileName}`;
-  const fullPath = join(config.vaultPath, vaultPath);
-  mkdirSync(join(config.vaultPath, ASSET_DIRECTORY), { recursive: true });
+  const vaultPath = storageMode === "persistent" ? `${ASSET_DIRECTORY}/${fileName}` : undefined;
+  const fullPath = vaultPath ? join(config.vaultPath, vaultPath) : join(tempDirectory ?? config.vaultPath, fileName);
+  if (vaultPath) {
+    mkdirSync(join(config.vaultPath, ASSET_DIRECTORY), { recursive: true });
+  } else if (tempDirectory) {
+    mkdirSync(tempDirectory, { recursive: true });
+  }
   writeFileSync(fullPath, parsed.buffer);
   return {
     id: asset.id,
@@ -73,6 +93,12 @@ function persistVisualAsset(
     frameCount: asset.frameCount,
     sampleDelayMs: asset.sampleDelayMs,
   };
+}
+
+function createTempAssetDirectory(config: BridgeConfig, prefix: string): string {
+  const root = join(config.vaultPath, TEMP_ASSET_DIRECTORY);
+  mkdirSync(root, { recursive: true });
+  return mkdtempSync(join(root, prefix));
 }
 
 function stripDataUrl(asset: VisualAsset): VisualAsset {

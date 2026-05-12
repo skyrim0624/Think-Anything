@@ -1,4 +1,11 @@
-import type { LinkedPageContext, ReadingContext, VisualAsset, VisualRect, VisualViewport } from "@twyr/shared";
+import type {
+  LinkedPageContext,
+  ReadingContext,
+  VideoTranscriptContext,
+  VisualAsset,
+  VisualRect,
+  VisualViewport,
+} from "@twyr/shared";
 import type { PendingAction, RuntimeMessage } from "./messages.js";
 import { askTwyr, captureTwyr, loadSettings, promoteSource, retrieveTwyr, sendFeedback } from "./api.js";
 import { PENDING_ACTION_KEY } from "./messages.js";
@@ -23,6 +30,8 @@ const VIDEO_SAMPLE_DELAYS_MS = [0, 700, 1400] as const;
 const MAX_LINKED_PAGES = 3;
 const MAX_LINKED_PAGE_TEXT = 12_000;
 const LINK_FETCH_TIMEOUT_MS = 7000;
+const MAX_VIDEO_TRANSCRIPTS = 3;
+const MAX_VIDEO_TRANSCRIPT_TEXT = 18_000;
 
 chrome.runtime.onInstalled.addListener(() => {
   void setupContextMenus();
@@ -115,7 +124,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
       async () =>
         captureTwyrFromStorage({
           ...message.body,
-          context: await captureVisualContext(message.body.context, sender.tab?.id),
+          context: await prepareImportantContext(message.body.context, sender.tab?.id),
         }),
       sendResponse,
     );
@@ -130,7 +139,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
       async () =>
         promoteSourceFromStorage({
           ...message.body,
-          context: await captureVisualContext(message.body.context, sender.tab?.id),
+          context: await prepareImportantContext(message.body.context, sender.tab?.id),
         }),
       sendResponse,
     );
@@ -174,12 +183,26 @@ async function sendFeedbackFromStorage(body: Parameters<typeof sendFeedback>[1])
 }
 
 async function prepareAskContext(context: ReadingContext, sourceTabId?: number): Promise<ReadingContext> {
-  const visualContext = await captureVisualContext(context, sourceTabId);
+  const transcriptContext = await enrichVideoTranscripts(context);
+  const hasTranscript = hasUsableVideoTranscript(transcriptContext);
+  const visualContext = await captureVisualContext(transcriptContext, sourceTabId, { skipVideoFrames: hasTranscript });
   return enrichLinkedPages(visualContext);
 }
 
-async function captureVisualContext(context: ReadingContext, sourceTabId?: number): Promise<ReadingContext> {
-  const candidates = (context.visualAssets ?? []).filter((asset) => asset.rect && !asset.dataUrl).slice(0, MAX_VISUAL_ASSETS);
+async function prepareImportantContext(context: ReadingContext, sourceTabId?: number): Promise<ReadingContext> {
+  const transcriptContext = await enrichVideoTranscripts(context);
+  const visualContext = await captureVisualContext(transcriptContext, sourceTabId);
+  return enrichLinkedPages(visualContext);
+}
+
+async function captureVisualContext(
+  context: ReadingContext,
+  sourceTabId?: number,
+  options: { skipVideoFrames?: boolean } = {},
+): Promise<ReadingContext> {
+  const candidates = (context.visualAssets ?? [])
+    .filter((asset) => asset.rect && !asset.dataUrl && !(options.skipVideoFrames && asset.type === "video"))
+    .slice(0, MAX_VISUAL_ASSETS);
   if (!candidates.length) return context;
 
   try {
@@ -234,6 +257,118 @@ async function enrichLinkedPages(context: ReadingContext): Promise<ReadingContex
   return { ...context, linkedPages };
 }
 
+async function enrichVideoTranscripts(context: ReadingContext): Promise<ReadingContext> {
+  const transcripts = dedupeVideoTranscripts(context.videoTranscripts ?? []).slice(0, MAX_VIDEO_TRANSCRIPTS);
+  if (!transcripts.length) return context;
+  const videoTranscripts = await Promise.all(transcripts.map((transcript) => fetchVideoTranscript(transcript)));
+  return { ...context, videoTranscripts };
+}
+
+function hasUsableVideoTranscript(context: ReadingContext): boolean {
+  return (context.videoTranscripts ?? []).some((transcript) => (transcript.text?.trim().length ?? 0) > 120);
+}
+
+function dedupeVideoTranscripts(transcripts: VideoTranscriptContext[]): VideoTranscriptContext[] {
+  const seen = new Set<string>();
+  return transcripts.filter((transcript) => {
+    const key = transcript.sourceUrl || transcript.id;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function fetchVideoTranscript(transcript: VideoTranscriptContext): Promise<VideoTranscriptContext> {
+  if (transcript.text?.trim()) {
+    return {
+      ...transcript,
+      text: trimText(transcript.text, MAX_VIDEO_TRANSCRIPT_TEXT),
+      fetchedAt: transcript.fetchedAt || new Date().toISOString(),
+    };
+  }
+  if (!transcript.sourceUrl) return transcript;
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), LINK_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(transcript.sourceUrl, {
+      signal: controller.signal,
+      credentials: "omit",
+      redirect: "follow",
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const raw = await response.text();
+    return {
+      ...transcript,
+      text: parseSubtitleText(raw).slice(0, MAX_VIDEO_TRANSCRIPT_TEXT),
+      fetchedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    return {
+      ...transcript,
+      fetchedAt: new Date().toISOString(),
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
+}
+
+function parseSubtitleText(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    return parseSubtitleJson(trimmed);
+  }
+  return trimmed
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false;
+      if (line === "WEBVTT") return false;
+      if (/^\d+$/.test(line)) return false;
+      if (/^\d{1,2}:\d{2}[:.]\d{2}/.test(line)) return false;
+      if (/-->/.test(line)) return false;
+      if (/^(Kind|Language):/i.test(line)) return false;
+      return true;
+    })
+    .map((line) => line.replace(/<[^>]+>/g, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function parseSubtitleJson(raw: string): string {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    const strings: string[] = [];
+    collectSubtitleStrings(value, strings);
+    return strings.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  } catch {
+    return raw;
+  }
+}
+
+function collectSubtitleStrings(value: unknown, output: string[]): void {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text.length > 1) output.push(text);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectSubtitleStrings(item, output));
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  for (const key of ["text", "utf8", "caption", "subtitle", "transcript"]) {
+    collectSubtitleStrings(record[key], output);
+  }
+  for (const key of ["events", "segs", "segments", "captions", "subtitles"]) {
+    collectSubtitleStrings(record[key], output);
+  }
+}
+
 function dedupeLinkedPages(links: LinkedPageContext[]): LinkedPageContext[] {
   const seen = new Set<string>();
   return links.filter((link) => {
@@ -241,6 +376,13 @@ function dedupeLinkedPages(links: LinkedPageContext[]): LinkedPageContext[] {
     seen.add(link.url);
     return true;
   });
+}
+
+function trimText(value: string | undefined, maxLength: number): string {
+  if (!value) return "";
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 async function fetchLinkedPage(link: LinkedPageContext): Promise<LinkedPageContext> {

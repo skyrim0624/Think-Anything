@@ -13,6 +13,17 @@ import type {
   TwyrConversationMessage,
 } from "@twyr/shared";
 import { DEFAULT_CODEX_MODEL } from "@twyr/shared";
+import {
+  archiveConversationInHistory,
+  deleteConversationFromHistory,
+  getActiveConversations,
+  normalizeStoredConversations,
+  renameConversationInHistory,
+  upsertConversationSnapshot as upsertStoredConversationSnapshot,
+  type DockReasoningPreset,
+  type InlineRole,
+  type StoredDockConversation,
+} from "./conversation-history.js";
 import type { PendingAction, RuntimeMessage } from "./messages.js";
 
 interface InlineBubbleOptions {
@@ -20,9 +31,7 @@ interface InlineBubbleOptions {
   showToast: (text: string) => void;
 }
 
-type InlineRole = "user" | "assistant" | "system";
 type DockState = "collapsed" | "mini" | "expanded";
-type DockReasoningPreset = "fast" | "xhigh";
 
 interface InlineMessage {
   role: InlineRole;
@@ -43,41 +52,19 @@ interface PersistedDockState {
   reasoningPreset?: DockReasoningPreset;
 }
 
-interface StoredDockMessage {
-  role: InlineRole;
-  content: string;
-  feedbackRating?: FeedbackRating;
-}
-
-interface StoredDockConversation {
-  id: string;
-  sessionId: string;
-  title: string;
-  sourceUrl: string;
-  site?: string;
-  createdAt: number;
-  updatedAt: number;
-  threadPath?: string;
-  context?: ReadingContext;
-  messages: StoredDockMessage[];
-  lastQuestion?: string;
-  lastAnswer?: string;
-  lastSaveRecommendation?: SaveRecommendation;
-  model?: string;
-  reasoningPreset?: DockReasoningPreset;
-}
-
 type InlineApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
 const HOST_ID = "twyr-inline-bubble-host";
 const DOCK_STORAGE_KEY = "twyr.dock.state.v1";
 const CONVERSATION_HISTORY_KEY = "twyr.dock.conversations.v1";
-const EXPANDED_WIDTH = 430;
+const EXPANDED_WIDTH = 520;
 const MINI_WIDTH = 360;
 const COLLAPSED_WIDTH = 62;
 const DEFAULT_QUESTION = "解释这段内容，并指出它是否值得保存。";
-const MAX_HISTORY_SESSIONS = 18;
+const MAX_ACTIVE_HISTORY_SESSIONS = 18;
+const MAX_STORED_HISTORY_SESSIONS = 36;
 const MAX_STORED_MESSAGES = 18;
+const QUICK_RAIL_SESSIONS = 7;
 
 let host: HTMLDivElement | undefined;
 let shadow: ShadowRoot | undefined;
@@ -108,6 +95,13 @@ let dragState:
       startTop: number;
     }
   | undefined;
+let pageSelectionSnapshot:
+  | {
+      text: string;
+      ranges: Range[];
+    }
+  | undefined;
+let selectionWatcherBound = false;
 
 export function ensureInlineDock(options: InlineBubbleOptions): void {
   ensureBubble(options);
@@ -116,11 +110,12 @@ export function ensureInlineDock(options: InlineBubbleOptions): void {
 
 export function openInlineBubble(options: InlineBubbleOptions): void {
   ensureBubble(options);
+  rememberPageSelection();
   currentContext = options.captureContext("selection");
   logCaptureDetails(currentContext);
   setDockState("expanded", options);
   options.showToast("Think Anytime：上下文已附加");
-  getTextarea("question")?.focus();
+  focusComposer({ preservePageSelection: Boolean(currentContext.selectionText) });
 }
 
 export function toggleInlineDock(options: InlineBubbleOptions): void {
@@ -133,11 +128,12 @@ export function toggleInlineDock(options: InlineBubbleOptions): void {
 
 export function attachContextToInlineDock(options: InlineBubbleOptions): void {
   ensureBubble(options);
+  rememberPageSelection();
   currentContext = options.captureContext("selection");
   logCaptureDetails(currentContext);
   setDockState("expanded", options);
   options.showToast("Think Anytime：上下文已添加到 Dock");
-  focusComposer();
+  focusComposer({ preservePageSelection: Boolean(currentContext.selectionText) });
 }
 
 export async function quickSaveInlineSelection(options: InlineBubbleOptions): Promise<void> {
@@ -181,11 +177,14 @@ function ensureBubble(options: InlineBubbleOptions): void {
   Object.assign(host.style, {
     position: "fixed",
     zIndex: "2147483647",
+    isolation: "isolate",
+    pointerEvents: "auto",
   });
   shadow = host.attachShadow({ mode: "open" });
   shadow.innerHTML = buildShell();
   bindEvents(options);
   document.documentElement.appendChild(host);
+  bindSelectionWatcher();
   void loadConversationHistory(options);
   if (!resizeBound) {
     resizeBound = true;
@@ -198,6 +197,7 @@ function ensureBubble(options: InlineBubbleOptions): void {
 }
 
 function bindEvents(options: InlineBubbleOptions): void {
+  bindSelectionPreservingPointerEvents();
   getTextarea("question")?.addEventListener("keydown", (event) => {
     const keyboardEvent = event as KeyboardEvent;
     if (isImeComposing(keyboardEvent)) return;
@@ -225,14 +225,16 @@ function bindEvents(options: InlineBubbleOptions): void {
     }
   });
   getButton("open")?.addEventListener("click", () => {
+    rememberPageSelection();
     currentContext = options.captureContext("selection");
     setDockState("mini", options);
-    getTextarea("mini-question")?.focus();
+    focusMiniComposer({ preservePageSelection: Boolean(currentContext.selectionText) });
   });
   getButton("expand-dock")?.addEventListener("click", () => {
+    rememberPageSelection();
     if (!currentContext) currentContext = options.captureContext("selection");
     setDockState("expanded", options);
-    getTextarea("question")?.focus();
+    focusComposer({ preservePageSelection: Boolean(currentContext?.selectionText) });
   });
   getButtons("collapse").forEach((button) => {
     button.addEventListener("click", () => setDockState("collapsed", options));
@@ -278,10 +280,88 @@ function bindEvents(options: InlineBubbleOptions): void {
   });
 }
 
-function focusComposer(): void {
+function bindSelectionWatcher(): void {
+  if (selectionWatcherBound) return;
+  selectionWatcherBound = true;
+  rememberPageSelection();
+  document.addEventListener("selectionchange", rememberPageSelection, true);
+}
+
+function bindSelectionPreservingPointerEvents(): void {
+  shadow?.addEventListener(
+    "pointerdown",
+    (event) => {
+      preserveSelectionForDockEvent(event);
+    },
+    { capture: true },
+  );
+  shadow?.addEventListener(
+    "mousedown",
+    (event) => {
+      preserveSelectionForDockEvent(event);
+    },
+    { capture: true },
+  );
+}
+
+function preserveSelectionForDockEvent(event: Event): void {
+  const rawTarget = event.composedPath()[0];
+  const target =
+    rawTarget instanceof Element ? rawTarget : rawTarget instanceof Node ? rawTarget.parentElement : null;
+  if (!target || isDockEditableControl(target)) return;
+  rememberPageSelection();
+  event.preventDefault();
+  restorePageSelection();
+}
+
+function isDockEditableControl(element: Element): boolean {
+  return Boolean(element.closest("input, textarea, select, [contenteditable], [role='textbox']"));
+}
+
+function rememberPageSelection(): void {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+  const text = selection.toString().trim();
+  if (text.length < 2) return;
+  const ranges = Array.from({ length: selection.rangeCount }, (_value, index) => selection.getRangeAt(index).cloneRange());
+  if (ranges.some((range) => isRangeInsideDock(range))) return;
+  pageSelectionSnapshot = { text, ranges };
+}
+
+function restorePageSelection(): void {
+  if (!pageSelectionSnapshot?.ranges.length) return;
+  const selection = window.getSelection();
+  if (!selection) return;
+  selection.removeAllRanges();
+  for (const range of pageSelectionSnapshot.ranges) {
+    selection.addRange(range.cloneRange());
+  }
+}
+
+function isRangeInsideDock(range: Range): boolean {
+  if (!host) return false;
+  const node = range.commonAncestorContainer;
+  return host.contains(node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement);
+}
+
+function focusComposer(settings: { preservePageSelection?: boolean } = {}): void {
   window.setTimeout(() => {
+    if (settings.preservePageSelection) {
+      restorePageSelection();
+      return;
+    }
     const textarea = getTextarea("question");
     textarea?.focus();
+  }, 0);
+}
+
+function focusMiniComposer(settings: { preservePageSelection?: boolean } = {}): void {
+  window.setTimeout(() => {
+    if (settings.preservePageSelection) {
+      restorePageSelection();
+      return;
+    }
+    getTextarea("mini-question")?.focus();
   }, 0);
 }
 
@@ -304,6 +384,7 @@ function renderBubble(options: InlineBubbleOptions): void {
   const modeLabel = shadow.querySelector<HTMLElement>("[data-role='mode-label']");
   const modelSelect = getSelect("model");
   const reasoningSelect = getSelect("reasoning");
+  const conversationRail = shadow.querySelector<HTMLElement>("[data-role='conversation-rail']");
   const historyPanel = shadow.querySelector<HTMLElement>("[data-role='history-panel']");
 
   if (root) root.dataset.state = dockState;
@@ -317,11 +398,14 @@ function renderBubble(options: InlineBubbleOptions): void {
     messageList.scrollTop = messageList.scrollHeight;
     bindFeedbackButtons(options);
   }
+  if (conversationRail) {
+    conversationRail.innerHTML = renderQuickConversationRail();
+  }
   if (historyPanel) {
     historyPanel.innerHTML = renderHistoryPanel();
     historyPanel.hidden = !historyOpen;
-    bindHistoryButtons(options);
   }
+  bindConversationButtons(options);
   if (sendButton) sendButton.textContent = currentBusy ? "停止" : "发送";
   if (miniSendButton) miniSendButton.textContent = currentBusy ? "停止" : "发送";
   if (saveButton) saveButton.textContent = Date.now() - lastSavedAt < 1600 ? "已保存" : "保存";
@@ -424,7 +508,7 @@ function stopActiveRequest(options: InlineBubbleOptions): void {
   messages.push({ role: "system", content: "已停止等待；如果原请求稍后返回，本窗口会忽略那次结果。" });
   renderBubble(options);
   void saveCurrentConversation();
-  getTextarea("question")?.focus();
+  restorePageSelection();
 }
 
 async function retryLastQuestion(options: InlineBubbleOptions): Promise<void> {
@@ -591,8 +675,9 @@ async function sendInlineFeedback(
   }
 }
 
-function resetConversation(options: InlineBubbleOptions): void {
-  void saveCurrentConversation();
+function resetConversation(options: InlineBubbleOptions, settings: { saveCurrent?: boolean } = {}): void {
+  rememberPageSelection();
+  if (settings.saveCurrent !== false) void saveCurrentConversation();
   messages = [];
   lastQuestion = "";
   lastAnswer = "";
@@ -605,7 +690,7 @@ function resetConversation(options: InlineBubbleOptions): void {
   currentContext = options.captureContext("selection");
   historyOpen = false;
   renderBubble(options);
-  getTextarea("question")?.focus();
+  restorePageSelection();
 }
 
 function prepareContextForSend(options: InlineBubbleOptions, contextScope: TwyrContextScope): ReadingContext {
@@ -625,6 +710,9 @@ function mergeReadingContext(nextContext: ReadingContext, previousContext: Readi
     surroundingText: nextContext.surroundingText || previousContext.surroundingText,
     visualAssets: nextContext.visualAssets?.length ? nextContext.visualAssets : previousContext.visualAssets,
     linkedPages: nextContext.linkedPages?.length ? nextContext.linkedPages : previousContext.linkedPages,
+    videoTranscripts: nextContext.videoTranscripts?.length
+      ? nextContext.videoTranscripts
+      : previousContext.videoTranscripts,
   };
 }
 
@@ -761,29 +849,58 @@ function renderContextChips(): string {
       ? [`<span class="chip">${currentContext.visualAssets.length} 个画面</span>`]
       : []),
     ...(currentContext.linkedPages?.length ? [`<span class="chip">${currentContext.linkedPages.length} 个链接</span>`] : []),
+    ...(currentContext.videoTranscripts?.length
+      ? [`<span class="chip">${currentContext.videoTranscripts.length} 个字幕</span>`]
+      : []),
     `<span class="chip chip-title">${escapeHtml(currentContext.source.site || currentContext.source.title || "网页")}</span>`,
   ];
   return chips.join("");
 }
 
 function renderHistoryPanel(): string {
-  if (!historySessions.length) {
+  const activeConversations = getActiveConversations(historySessions, MAX_ACTIVE_HISTORY_SESSIONS);
+  if (!activeConversations.length) {
     return '<div class="history-empty">还没有可继续的历史对话。</div>';
   }
-  const rows = historySessions
-    .slice(0, MAX_HISTORY_SESSIONS)
+  const rows = activeConversations
     .map((conversation) => {
       const activeClass = conversation.sessionId === sessionId ? " history-item-active" : "";
       const pendingLabel = pendingRequests.has(conversation.sessionId) ? " · 思考中" : "";
       const lastMessage = conversation.messages.at(-1)?.content || conversation.title;
-      return `<button class="history-item${activeClass}" type="button" data-history-id="${escapeHtml(conversation.id)}">
-        <span class="history-title">${escapeHtml(conversation.title)}</span>
-        <span class="history-meta">${escapeHtml(formatHistoryTime(conversation.updatedAt))}${conversation.site ? ` · ${escapeHtml(conversation.site)}` : ""}${pendingLabel}</span>
-        <span class="history-snippet">${escapeHtml(trimInlineText(lastMessage, 86))}</span>
-      </button>`;
+      return `<div class="history-item${activeClass}">
+        <button class="history-open" type="button" data-conversation-open="${escapeHtml(conversation.id)}">
+          <span class="history-title">${escapeHtml(conversation.title)}</span>
+          <span class="history-meta">${escapeHtml(formatHistoryTime(conversation.updatedAt))}${conversation.site ? ` · ${escapeHtml(conversation.site)}` : ""}${pendingLabel}</span>
+          <span class="history-snippet">${escapeHtml(trimInlineText(lastMessage, 86))}</span>
+        </button>
+        <div class="history-actions" aria-label="对话操作">
+          <button class="micro-button" type="button" data-conversation-command="rename" data-conversation-id="${escapeHtml(conversation.id)}">改名</button>
+          <button class="micro-button" type="button" data-conversation-command="archive" data-conversation-id="${escapeHtml(conversation.id)}">归档</button>
+          <button class="micro-button micro-button-danger" type="button" data-conversation-command="delete" data-conversation-id="${escapeHtml(conversation.id)}">删除</button>
+        </div>
+      </div>`;
     })
     .join("");
   return `<div class="history-list">${rows}</div>`;
+}
+
+function renderQuickConversationRail(): string {
+  const activeConversations = getActiveConversations(historySessions, QUICK_RAIL_SESSIONS);
+  const rows = activeConversations
+    .map((conversation) => {
+      const activeClass = conversation.sessionId === sessionId ? " rail-item-active" : "";
+      const pendingLabel = pendingRequests.has(conversation.sessionId) ? " · 思考中" : "";
+      return `<button class="rail-item${activeClass}" type="button" data-conversation-open="${escapeHtml(conversation.id)}" title="${escapeHtml(conversation.title)}">
+        <span class="rail-title">${escapeHtml(conversation.title)}</span>
+        <span class="rail-meta">${escapeHtml(formatHistoryTime(conversation.updatedAt))}${pendingLabel}</span>
+      </button>`;
+    })
+    .join("");
+  return `<div class="rail-heading">
+      <span>对话</span>
+      <button class="rail-new" type="button" data-conversation-command="new" aria-label="新对话">＋</button>
+    </div>
+    <div class="rail-list">${rows || '<div class="rail-empty">暂无历史</div>'}</div>`;
 }
 
 function getTextarea(role: "question" | "mini-question"): HTMLTextAreaElement | HTMLInputElement | null {
@@ -813,13 +930,66 @@ function bindFeedbackButtons(options: InlineBubbleOptions): void {
   });
 }
 
-function bindHistoryButtons(options: InlineBubbleOptions): void {
-  shadow?.querySelectorAll<HTMLButtonElement>("[data-history-id]").forEach((button) => {
+function bindConversationButtons(options: InlineBubbleOptions): void {
+  shadow?.querySelectorAll<HTMLButtonElement>("[data-conversation-open]").forEach((button) => {
     button.addEventListener("click", () => {
-      const id = button.dataset.historyId;
+      const id = button.dataset.conversationOpen;
       if (id) restoreConversation(id, options);
     });
   });
+  shadow?.querySelectorAll<HTMLButtonElement>("[data-conversation-command]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const command = button.dataset.conversationCommand;
+      const id = button.dataset.conversationId;
+      if (command === "new") {
+        resetConversation(options);
+        return;
+      }
+      if (!id) return;
+      if (command === "rename") renameConversation(id, options);
+      if (command === "archive") archiveConversation(id, options);
+      if (command === "delete") deleteConversation(id, options);
+    });
+  });
+}
+
+function renameConversation(id: string, options: InlineBubbleOptions): void {
+  const conversation = historySessions.find((item) => item.id === id);
+  if (!conversation) return;
+  const nextTitle = window.prompt("重命名对话", conversation.title);
+  if (nextTitle === null) return;
+  historySessions = renameConversationInHistory(historySessions, id, nextTitle);
+  void persistConversationHistory();
+  renderBubble(options);
+  restorePageSelection();
+}
+
+function archiveConversation(id: string, options: InlineBubbleOptions): void {
+  const conversation = historySessions.find((item) => item.id === id);
+  if (!conversation) return;
+  historySessions = archiveConversationInHistory(historySessions, id);
+  void persistConversationHistory();
+  if (conversation.sessionId === sessionId) {
+    resetConversation(options, { saveCurrent: false });
+    return;
+  }
+  renderBubble(options);
+  restorePageSelection();
+}
+
+function deleteConversation(id: string, options: InlineBubbleOptions): void {
+  const conversation = historySessions.find((item) => item.id === id);
+  if (!conversation) return;
+  const confirmed = window.confirm(`删除“${conversation.title}”？这个操作不会删除已经保存到知识库的笔记。`);
+  if (!confirmed) return;
+  historySessions = deleteConversationFromHistory(historySessions, id);
+  void persistConversationHistory();
+  if (conversation.sessionId === sessionId) {
+    resetConversation(options, { saveCurrent: false });
+    return;
+  }
+  renderBubble(options);
+  restorePageSelection();
 }
 
 function isCurrentConversationBusy(): boolean {
@@ -830,7 +1000,7 @@ async function loadConversationHistory(options: InlineBubbleOptions): Promise<vo
   try {
     const stored = await chrome.storage.local.get(CONVERSATION_HISTORY_KEY);
     const value = stored[CONVERSATION_HISTORY_KEY];
-    historySessions = normalizeStoredConversations(value);
+    historySessions = normalizeStoredConversations(value, MAX_STORED_HISTORY_SESSIONS, MAX_STORED_MESSAGES);
     renderBubble(options);
   } catch (error) {
     console.warn("[Think Anytime] 无法读取历史对话", error);
@@ -872,9 +1042,7 @@ function buildCurrentConversationSnapshot(): StoredDockConversation {
 }
 
 function upsertConversationSnapshot(record: StoredDockConversation): void {
-  historySessions = [record, ...historySessions.filter((conversation) => conversation.sessionId !== record.sessionId)]
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, MAX_HISTORY_SESSIONS);
+  historySessions = upsertStoredConversationSnapshot(historySessions, record, MAX_STORED_HISTORY_SESSIONS);
 }
 
 async function persistConversationHistory(): Promise<void> {
@@ -972,30 +1140,7 @@ function restoreConversation(id: string, options: InlineBubbleOptions): void {
   }));
   historyOpen = false;
   setDockState("expanded", options);
-  getTextarea("question")?.focus();
-}
-
-function normalizeStoredConversations(value: unknown): StoredDockConversation[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is StoredDockConversation => {
-      if (!item || typeof item !== "object") return false;
-      const record = item as Partial<StoredDockConversation>;
-      return Boolean(record.id && record.sessionId && record.title && Array.isArray(record.messages));
-    })
-    .map((item) => ({
-      ...item,
-      messages: item.messages
-        .filter((message) => message.role === "user" || message.role === "assistant" || message.role === "system")
-        .map((message) => ({
-          role: message.role,
-          content: String(message.content || ""),
-          feedbackRating: message.feedbackRating,
-        }))
-        .slice(-MAX_STORED_MESSAGES),
-    }))
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, MAX_HISTORY_SESSIONS);
+  restorePageSelection();
 }
 
 function sanitizeContextForHistory(context: ReadingContext): ReadingContext {
@@ -1028,6 +1173,16 @@ function sanitizeContextForHistory(context: ReadingContext): ReadingContext {
       text: trimInlineText(page.text, 1800),
       fetchedAt: page.fetchedAt,
       error: page.error,
+    })),
+    videoTranscripts: context.videoTranscripts?.map((transcript) => ({
+      id: transcript.id,
+      label: transcript.label,
+      language: transcript.language,
+      kind: transcript.kind,
+      sourceUrl: transcript.sourceUrl,
+      text: trimInlineText(transcript.text, 2400),
+      fetchedAt: transcript.fetchedAt,
+      error: transcript.error,
     })),
     capturedAt: context.capturedAt,
   };
@@ -1104,6 +1259,85 @@ function buildShell(): string {
 
       .expanded {
         overflow: hidden;
+      }
+
+      .expanded-layout {
+        display: grid;
+        grid-template-columns: 118px minmax(0, 1fr);
+        min-height: 0;
+      }
+
+      .conversation-rail {
+        min-width: 0;
+        padding: 8px 7px;
+        border-right: 1px solid rgba(17, 24, 39, 0.06);
+        background: rgba(251, 252, 252, 0.72);
+      }
+
+      .conversation-main {
+        min-width: 0;
+      }
+
+      .rail-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        margin-bottom: 7px;
+        color: #6b7280;
+        font-size: 11px;
+        font-weight: 680;
+      }
+
+      .rail-new {
+        width: 26px;
+        min-width: 26px;
+        min-height: 26px;
+        padding: 0;
+        border-radius: 7px;
+      }
+
+      .rail-list {
+        display: grid;
+        gap: 5px;
+        max-height: 406px;
+        overflow: auto;
+      }
+
+      .rail-item {
+        display: grid;
+        gap: 2px;
+        width: 100%;
+        min-height: 44px;
+        padding: 7px;
+        text-align: left;
+      }
+
+      .rail-item-active {
+        border-color: rgba(17, 24, 39, 0.3);
+        background: #ffffff;
+      }
+
+      .rail-title,
+      .rail-meta {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .rail-title {
+        font-size: 11px;
+        font-weight: 680;
+      }
+
+      .rail-meta,
+      .rail-empty {
+        color: #6b7280;
+        font-size: 10px;
+      }
+
+      .rail-empty {
+        padding: 6px 2px;
       }
 
       .topbar {
@@ -1358,15 +1592,48 @@ function buildShell(): string {
 
       .history-item {
         display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
         gap: 2px;
+        align-items: center;
         width: 100%;
         min-height: 0;
+        border: 1px solid rgba(17, 24, 39, 0.08);
+        border-radius: 9px;
+        background: #ffffff;
+      }
+
+      .history-open {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+        min-height: 0;
         padding: 8px 9px;
+        border: 0;
+        background: transparent;
         text-align: left;
       }
 
       .history-item-active {
         border-color: rgba(17, 24, 39, 0.28);
+      }
+
+      .history-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding-right: 6px;
+      }
+
+      .micro-button {
+        min-height: 26px;
+        padding: 3px 6px;
+        border-radius: 7px;
+        color: #6b7280;
+        font-size: 11px;
+      }
+
+      .micro-button-danger {
+        color: #9f1239;
       }
 
       .history-title,
@@ -1486,7 +1753,15 @@ function buildShell(): string {
           background: rgba(248, 250, 252, 0.04);
         }
 
+        .conversation-rail {
+          border-color: rgba(226, 232, 240, 0.1);
+          background: rgba(248, 250, 252, 0.04);
+        }
+
         .mode,
+        .rail-heading,
+        .rail-meta,
+        .rail-empty,
         .message-role,
         .history-meta,
         .history-snippet,
@@ -1503,6 +1778,12 @@ function buildShell(): string {
           border-color: rgba(226, 232, 240, 0.12);
           background: #11161c;
           color: #f8fafc;
+        }
+
+        .history-item,
+        .rail-item-active {
+          border-color: rgba(226, 232, 240, 0.12);
+          background: #11161c;
         }
 
         .topbar-tools select,
@@ -1538,6 +1819,22 @@ function buildShell(): string {
       @media (prefers-reduced-motion: reduce) {
         button {
           transition-duration: 0.01ms !important;
+        }
+      }
+
+      @media (max-width: 460px) {
+        .expanded-layout {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .conversation-rail {
+          border-right: 0;
+          border-bottom: 1px solid rgba(17, 24, 39, 0.06);
+        }
+
+        .rail-list {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          max-height: 104px;
         }
       }
     </style>
@@ -1581,22 +1878,27 @@ function buildShell(): string {
           </div>
           <div class="chips" data-role="context-chips"></div>
         </div>
-        <div class="history-panel" data-role="history-panel" hidden></div>
-        <div class="messages" data-role="messages" aria-live="polite"></div>
-        <div class="composer">
-          <textarea data-role="question" placeholder="${DEFAULT_QUESTION}"></textarea>
-          <div class="actions">
-            <div class="secondary-actions">
-              <button class="tool-button" type="button" data-action="save">保存</button>
-              <button class="tool-button" type="button" data-action="retrieve">查库</button>
-              <button class="tool-button" type="button" data-action="promote">入库</button>
-              <button class="tool-button" type="button" data-action="expand">展开</button>
+        <div class="expanded-layout">
+          <aside class="conversation-rail" data-role="conversation-rail" aria-label="快速切换对话"></aside>
+          <section class="conversation-main">
+            <div class="history-panel" data-role="history-panel" hidden></div>
+            <div class="messages" data-role="messages" aria-live="polite"></div>
+            <div class="composer">
+              <textarea data-role="question" placeholder="${DEFAULT_QUESTION}"></textarea>
+              <div class="actions">
+                <div class="secondary-actions">
+                  <button class="tool-button" type="button" data-action="save">保存</button>
+                  <button class="tool-button" type="button" data-action="retrieve">查库</button>
+                  <button class="tool-button" type="button" data-action="promote">入库</button>
+                  <button class="tool-button" type="button" data-action="expand">展开</button>
+                </div>
+                <div class="primary-actions">
+                  <button class="tool-button" type="button" data-action="retry" hidden>重试</button>
+                  <button class="send-button" type="button" data-action="send">发送</button>
+                </div>
+              </div>
             </div>
-            <div class="primary-actions">
-              <button class="tool-button" type="button" data-action="retry" hidden>重试</button>
-              <button class="send-button" type="button" data-action="send">发送</button>
-            </div>
-          </div>
+          </section>
         </div>
       </div>
     </section>

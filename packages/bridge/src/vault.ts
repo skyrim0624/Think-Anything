@@ -87,6 +87,9 @@ export class VaultService {
       params.context.linkedPages?.length
         ? ["**选区链接内容**", "", formatLinkedPages(params.context.linkedPages), ""].join("\n")
         : "",
+      params.context.videoTranscripts?.length
+        ? ["**视频字幕**", "", formatVideoTranscripts(params.context.videoTranscripts), ""].join("\n")
+        : "",
       "**Think Anytime 回答**",
       "",
       params.answer,
@@ -253,6 +256,9 @@ function buildCardMarkdown(
     request.context.linkedPages?.length
       ? ["## 选区链接内容", "", formatLinkedPages(request.context.linkedPages), ""].join("\n")
       : "",
+    request.context.videoTranscripts?.length
+      ? ["## 视频字幕", "", formatVideoTranscripts(request.context.videoTranscripts), ""].join("\n")
+      : "",
     request.question ? ["## 问题", "", request.question, ""].join("\n") : "",
     request.answer ? ["## Think Anytime 回答", "", request.answer, ""].join("\n") : "",
     request.conversation && request.conversation.length > 2
@@ -297,6 +303,22 @@ function formatLinkedPages(pages: ReadingContext["linkedPages"]): string {
         page.description ? `- 描述：${trimText(page.description, 300)}` : "",
         page.error ? `- 抓取失败：${page.error}` : "",
         page.text ? ["", trimText(page.text, 1200)].join("\n") : "",
+      ].filter(Boolean);
+      return details.join("\n");
+    })
+    .join("\n\n");
+}
+
+function formatVideoTranscripts(transcripts: ReadingContext["videoTranscripts"]): string {
+  return (transcripts ?? [])
+    .map((transcript, index) => {
+      const details = [
+        `${index + 1}. ${transcript.label || transcript.language || "视频字幕"}`,
+        transcript.language ? `- 语言：${transcript.language}` : "",
+        transcript.kind ? `- 类型：${transcript.kind}` : "",
+        transcript.sourceUrl ? `- 来源：${transcript.sourceUrl}` : "",
+        transcript.error ? `- 抓取失败：${transcript.error}` : "",
+        transcript.text ? ["", trimText(transcript.text, 1800)].join("\n") : "",
       ].filter(Boolean);
       return details.join("\n");
     })

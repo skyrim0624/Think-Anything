@@ -162,108 +162,115 @@ async function handleStatus(request: IncomingMessage, response: ServerResponse):
 async function handleAsk(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const startedAt = Date.now();
   const body = await readJson<AskRequest>(request);
-  const prepared = prepareVisualContext(body.context, config);
-  const mode = body.mode ?? "freeform";
-  const responseMode = body.responseMode ?? (body.forceRetrieval || mode === "connect" ? "deep" : "fast");
-  const contextScope = body.contextScope ?? (responseMode === "fast" ? "selection" : "page");
-  const sessionId =
-    body.sessionId ?? `session-${shortHash(`${prepared.context.source.url}:${prepared.context.capturedAt}`)}`;
-  const model = body.model?.trim() || DEFAULT_CODEX_MODEL;
-  const modelReasoningEffort = normalizeReasoningEffort(
-    body.modelReasoningEffort ?? (responseMode === "fast" ? "low" : "xhigh"),
-  );
-  const decision =
-    responseMode === "fast" && !body.forceRetrieval && mode !== "connect"
-      ? {
-          type: "skip" as const,
-          reason: "极速模式默认不查库；用户点击查库或进入深度模式时再检索。",
-          query: body.question.trim(),
-          notes: [],
-        }
-      : retrieval.decideAndSearch({
-          context: prepared.context,
-          query: body.question,
-          mode,
-          force: body.forceRetrieval,
-        });
-  const prompt = buildAskPrompt({
-    context: prepared.context,
-    question: body.question,
-    mode,
-    responseMode,
-    contextScope,
-    retrieval: decision,
-    conversation: body.conversation,
-  });
-  let output: Awaited<ReturnType<typeof runCodexPrompt>>;
+  const prepared = prepareVisualContext(body.context, config, { storageMode: "ephemeral" });
   try {
+    const mode = body.mode ?? "freeform";
+    const responseMode = body.responseMode ?? (body.forceRetrieval || mode === "connect" ? "deep" : "fast");
+    const contextScope = body.contextScope ?? (responseMode === "fast" ? "selection" : "page");
+    const sessionId =
+      body.sessionId ?? `session-${shortHash(`${prepared.context.source.url}:${prepared.context.capturedAt}`)}`;
+    const model = body.model?.trim() || DEFAULT_CODEX_MODEL;
+    const modelReasoningEffort = normalizeReasoningEffort(
+      body.modelReasoningEffort ?? (responseMode === "fast" ? "low" : "xhigh"),
+    );
+    const decision =
+      responseMode === "fast" && !body.forceRetrieval && mode !== "connect"
+        ? {
+            type: "skip" as const,
+            reason: "极速模式默认不查库；用户点击查库或进入深度模式时再检索。",
+            query: body.question.trim(),
+            notes: [],
+          }
+        : retrieval.decideAndSearch({
+            context: prepared.context,
+            query: body.question,
+            mode,
+            force: body.forceRetrieval,
+          });
+    const prompt = buildAskPrompt({
+      context: prepared.context,
+      question: body.question,
+      mode,
+      responseMode,
+      contextScope,
+      retrieval: decision,
+      conversation: body.conversation,
+    });
+    let output: Awaited<ReturnType<typeof runCodexPrompt>>;
     output = await runCodexPrompt(prompt, config, prepared.assets, { model, modelReasoningEffort });
+    const parsed = parseModelAnswer(output.text);
+    const threadPath = vault.appendThread({
+      context: prepared.context,
+      question: body.question,
+      answer: parsed.answer,
+      retrieval: decision,
+      recommendation: parsed.saveRecommendation,
+    });
+    retrieval.refreshIndex(responseMode === "deep");
+    const trace = harness.writeTrace({
+      action: "ask",
+      context: prepared.context,
+      question: body.question,
+      mode,
+      responseMode,
+      contextScope,
+      sessionId,
+      model,
+      modelReasoningEffort,
+      retrieval: decision,
+      saveRecommendation: parsed.saveRecommendation,
+      answer: parsed.answer,
+      resultPath: threadPath,
+      result: { runtime: output.runtime },
+      durationMs: Date.now() - startedAt,
+    });
+    const result: AskResponse = {
+      answer: parsed.answer,
+      mode,
+      responseMode,
+      contextScope,
+      sessionId,
+      model,
+      modelReasoningEffort,
+      retrieval: decision,
+      saveRecommendation: parsed.saveRecommendation,
+      threadPath,
+      traceId: trace.traceId,
+      rawModelOutput: parsed.rawModelOutput,
+    };
+    sendJson(response, 200, result);
   } catch (error) {
-    if (isCodexAuthError(error)) {
-      harness.writeTrace({
-        action: "ask",
-        context: prepared.context,
-        question: body.question,
-        mode,
-        responseMode,
-        contextScope,
-        sessionId,
-        model,
-        modelReasoningEffort,
-        retrieval: decision,
-        error: "Codex 登录不可用",
-        durationMs: Date.now() - startedAt,
-      });
-      sendJson(response, 503, {
-        error: "Codex 登录不可用",
-        detail:
-          "Think Anytime 的 Chrome 捕获和本地 Bridge 已经连通，但本机 Codex CLI 当前凭据不可用。请重新执行 Codex 登录，或用有效 OPENAI_API_KEY 登录后再提问。",
-      });
-      return;
-    }
-    throw error;
+    if (!isCodexAuthError(error)) throw error;
+    const mode = body.mode ?? "freeform";
+    const responseMode = body.responseMode ?? (body.forceRetrieval || mode === "connect" ? "deep" : "fast");
+    const contextScope = body.contextScope ?? (responseMode === "fast" ? "selection" : "page");
+    const sessionId =
+      body.sessionId ?? `session-${shortHash(`${prepared.context.source.url}:${prepared.context.capturedAt}`)}`;
+    const model = body.model?.trim() || DEFAULT_CODEX_MODEL;
+    const modelReasoningEffort = normalizeReasoningEffort(
+      body.modelReasoningEffort ?? (responseMode === "fast" ? "low" : "xhigh"),
+    );
+    harness.writeTrace({
+      action: "ask",
+      context: prepared.context,
+      question: body.question,
+      mode,
+      responseMode,
+      contextScope,
+      sessionId,
+      model,
+      modelReasoningEffort,
+      error: "Codex 登录不可用",
+      durationMs: Date.now() - startedAt,
+    });
+    sendJson(response, 503, {
+      error: "Codex 登录不可用",
+      detail:
+        "Think Anytime 的 Chrome 捕获和本地 Bridge 已经连通，但本机 Codex CLI 当前凭据不可用。请重新执行 Codex 登录，或用有效 OPENAI_API_KEY 登录后再提问。",
+    });
+  } finally {
+    prepared.cleanup();
   }
-  const parsed = parseModelAnswer(output.text);
-  const threadPath = vault.appendThread({
-    context: prepared.context,
-    question: body.question,
-    answer: parsed.answer,
-    retrieval: decision,
-    recommendation: parsed.saveRecommendation,
-  });
-  retrieval.refreshIndex(responseMode === "deep");
-  const trace = harness.writeTrace({
-    action: "ask",
-    context: prepared.context,
-    question: body.question,
-    mode,
-    responseMode,
-    contextScope,
-    sessionId,
-    model,
-    modelReasoningEffort,
-    retrieval: decision,
-    saveRecommendation: parsed.saveRecommendation,
-    answer: parsed.answer,
-    resultPath: threadPath,
-    result: { runtime: output.runtime },
-    durationMs: Date.now() - startedAt,
-  });
-  const result: AskResponse = {
-    answer: parsed.answer,
-    mode,
-    responseMode,
-    contextScope,
-    sessionId,
-    model,
-    modelReasoningEffort,
-    retrieval: decision,
-    saveRecommendation: parsed.saveRecommendation,
-    threadPath,
-    traceId: trace.traceId,
-    rawModelOutput: parsed.rawModelOutput,
-  };
-  sendJson(response, 200, result);
 }
 
 function normalizeReasoningEffort(value: string): TwyrModelReasoningEffort {
