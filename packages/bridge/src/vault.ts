@@ -84,6 +84,9 @@ export class VaultService {
       params.context.visualAssets?.length
         ? ["**视觉附件**", "", formatVisualAssets(params.context.visualAssets), ""].join("\n")
         : "",
+      params.context.linkedPages?.length
+        ? ["**选区链接内容**", "", formatLinkedPages(params.context.linkedPages), ""].join("\n")
+        : "",
       "**Think Anytime 回答**",
       "",
       params.answer,
@@ -247,6 +250,9 @@ function buildCardMarkdown(
     request.context.visualAssets?.length
       ? ["## 视觉附件", "", formatVisualAssets(request.context.visualAssets), ""].join("\n")
       : "",
+    request.context.linkedPages?.length
+      ? ["## 选区链接内容", "", formatLinkedPages(request.context.linkedPages), ""].join("\n")
+      : "",
     request.question ? ["## 问题", "", request.question, ""].join("\n") : "",
     request.answer ? ["## Think Anytime 回答", "", request.answer, ""].join("\n") : "",
     request.conversation && request.conversation.length > 2
@@ -278,6 +284,21 @@ function formatVisualAssets(assets: ReadingContext["visualAssets"]): string {
         asset.alt ? `- 描述：${asset.alt}` : "",
       ].filter(Boolean);
       return [title, imageLink, ...details].filter(Boolean).join("\n");
+    })
+    .join("\n\n");
+}
+
+function formatLinkedPages(pages: ReadingContext["linkedPages"]): string {
+  return (pages ?? [])
+    .map((page, index) => {
+      const details = [
+        `${index + 1}. ${page.title || page.url}`,
+        `- URL：${page.url}`,
+        page.description ? `- 描述：${trimText(page.description, 300)}` : "",
+        page.error ? `- 抓取失败：${page.error}` : "",
+        page.text ? ["", trimText(page.text, 1200)].join("\n") : "",
+      ].filter(Boolean);
+      return details.join("\n");
     })
     .join("\n\n");
 }

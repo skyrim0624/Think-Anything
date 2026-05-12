@@ -1,4 +1,4 @@
-import type { ReadingContext, VisualAsset, VisualRect, VisualViewport } from "@twyr/shared";
+import type { LinkedPageContext, ReadingContext, VisualAsset, VisualRect, VisualViewport } from "@twyr/shared";
 import type { PendingAction, RuntimeMessage } from "./messages.js";
 import { askTwyr, captureTwyr, loadSettings, promoteSource, retrieveTwyr, sendFeedback } from "./api.js";
 import { PENDING_ACTION_KEY } from "./messages.js";
@@ -20,6 +20,9 @@ const MAX_VISUAL_ASSETS = 3;
 const VISUAL_PADDING = 18;
 const MAX_VISUAL_DIMENSION = 1280;
 const VIDEO_SAMPLE_DELAYS_MS = [0, 700, 1400] as const;
+const MAX_LINKED_PAGES = 3;
+const MAX_LINKED_PAGE_TEXT = 12_000;
+const LINK_FETCH_TIMEOUT_MS = 7000;
 
 chrome.runtime.onInstalled.addListener(() => {
   void setupContextMenus();
@@ -101,7 +104,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
       async () =>
         askTwyrFromStorage({
           ...message.body,
-          context: await captureVisualContext(message.body.context, sender.tab?.id),
+          context: await prepareAskContext(message.body.context, sender.tab?.id),
         }),
       sendResponse,
     );
@@ -170,6 +173,11 @@ async function sendFeedbackFromStorage(body: Parameters<typeof sendFeedback>[1])
   return sendFeedback(await loadSettings(), body);
 }
 
+async function prepareAskContext(context: ReadingContext, sourceTabId?: number): Promise<ReadingContext> {
+  const visualContext = await captureVisualContext(context, sourceTabId);
+  return enrichLinkedPages(visualContext);
+}
+
 async function captureVisualContext(context: ReadingContext, sourceTabId?: number): Promise<ReadingContext> {
   const candidates = (context.visualAssets ?? []).filter((asset) => asset.rect && !asset.dataUrl).slice(0, MAX_VISUAL_ASSETS);
   if (!candidates.length) return context;
@@ -216,6 +224,100 @@ async function captureVisualContext(context: ReadingContext, sourceTabId?: numbe
     return { ...context, visualAssets };
   } catch {
     return context;
+  }
+}
+
+async function enrichLinkedPages(context: ReadingContext): Promise<ReadingContext> {
+  const links = dedupeLinkedPages(context.linkedPages ?? []).slice(0, MAX_LINKED_PAGES);
+  if (!links.length) return context;
+  const linkedPages = await Promise.all(links.map((link) => fetchLinkedPage(link)));
+  return { ...context, linkedPages };
+}
+
+function dedupeLinkedPages(links: LinkedPageContext[]): LinkedPageContext[] {
+  const seen = new Set<string>();
+  return links.filter((link) => {
+    if (!link.url || seen.has(link.url)) return false;
+    seen.add(link.url);
+    return true;
+  });
+}
+
+async function fetchLinkedPage(link: LinkedPageContext): Promise<LinkedPageContext> {
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), LINK_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(link.url, {
+      signal: controller.signal,
+      credentials: "omit",
+      redirect: "follow",
+    });
+    const contentType = response.headers.get("content-type") || "";
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!/text|html|json|xml/i.test(contentType)) {
+      throw new Error(`不支持的内容类型：${contentType || "unknown"}`);
+    }
+    const raw = await response.text();
+    const text = htmlToReadableText(raw).slice(0, MAX_LINKED_PAGE_TEXT);
+    return {
+      ...link,
+      title: extractHtmlTitle(raw) || link.title,
+      site: link.site || siteFromUrl(link.url),
+      description: extractHtmlMetaDescription(raw) || link.description,
+      text,
+      fetchedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    return {
+      ...link,
+      site: link.site || siteFromUrl(link.url),
+      fetchedAt: new Date().toISOString(),
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
+}
+
+function htmlToReadableText(raw: string): string {
+  return raw
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|section|article|li|h[1-6]|blockquote)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function extractHtmlTitle(raw: string): string | undefined {
+  const ogTitle = raw.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1];
+  const title = ogTitle || raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
+  return title ? htmlToReadableText(title).slice(0, 180) : undefined;
+}
+
+function extractHtmlMetaDescription(raw: string): string | undefined {
+  const match =
+    raw.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i) ||
+    raw.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i);
+  return match?.[1] ? htmlToReadableText(match[1]).slice(0, 500) : undefined;
+}
+
+function siteFromUrl(url: string): string | undefined {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return undefined;
   }
 }
 

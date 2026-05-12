@@ -70,6 +70,16 @@ export interface VisualAsset {
   capturedAt?: string;
 }
 
+export interface LinkedPageContext {
+  url: string;
+  title?: string;
+  site?: string;
+  description?: string;
+  text?: string;
+  fetchedAt?: string;
+  error?: string;
+}
+
 export interface ReadingContext {
   source: SourceMetadata;
   selectionText?: string;
@@ -81,6 +91,7 @@ export interface ReadingContext {
   highlights?: string[];
   viewport?: VisualViewport;
   visualAssets?: VisualAsset[];
+  linkedPages?: LinkedPageContext[];
   capturedAt: string;
 }
 

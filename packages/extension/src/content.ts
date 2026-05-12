@@ -1,4 +1,4 @@
-import type { ReadingContext, TwyrContextScope, VisualAsset, VisualRect } from "@twyr/shared";
+import type { LinkedPageContext, ReadingContext, TwyrContextScope, VisualAsset, VisualRect } from "@twyr/shared";
 import {
   attachContextToInlineDock,
   closeInlineBubble,
@@ -162,8 +162,54 @@ function captureReadingContext(scope: TwyrContextScope = "page"): ReadingContext
       devicePixelRatio: window.devicePixelRatio || 1,
     },
     visualAssets,
+    linkedPages: extractSelectionLinks(selection, selectionText),
     capturedAt: new Date().toISOString(),
   };
+}
+
+function extractSelectionLinks(selection: Selection | null, selectionText: string): LinkedPageContext[] {
+  const links = new Map<string, LinkedPageContext>();
+  if (selection && selection.rangeCount > 0) {
+    const fragment = selection.getRangeAt(0).cloneContents();
+    fragment.querySelectorAll?.("a[href]").forEach((anchor) => {
+      const href = anchor.getAttribute("href");
+      const url = normalizeUrl(href);
+      if (!url || links.has(url)) return;
+      links.set(url, {
+        url,
+        title: normalizeWhitespace(anchor.textContent || ""),
+        site: siteFromUrl(url),
+      });
+    });
+  }
+
+  const urlMatches = selectionText.matchAll(/https?:\/\/[^\s<>"'）)】\]}，。！？、；;]+/gi);
+  for (const match of urlMatches) {
+    const url = normalizeUrl(match[0]);
+    if (!url || links.has(url)) continue;
+    links.set(url, { url, site: siteFromUrl(url) });
+  }
+
+  return Array.from(links.values()).slice(0, 3);
+}
+
+function normalizeUrl(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value.trim(), location.href);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
+
+function siteFromUrl(url: string): string | undefined {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return undefined;
+  }
 }
 
 function rememberPointer(event: PointerEvent): void {

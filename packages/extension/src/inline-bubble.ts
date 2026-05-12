@@ -135,8 +135,9 @@ export function attachContextToInlineDock(options: InlineBubbleOptions): void {
   ensureBubble(options);
   currentContext = options.captureContext("selection");
   logCaptureDetails(currentContext);
-  setDockState(dockState === "collapsed" ? "mini" : dockState, options);
+  setDockState("expanded", options);
   options.showToast("Think Anytime：上下文已添加到 Dock");
+  focusComposer();
 }
 
 export async function quickSaveInlineSelection(options: InlineBubbleOptions): Promise<void> {
@@ -199,6 +200,7 @@ function ensureBubble(options: InlineBubbleOptions): void {
 function bindEvents(options: InlineBubbleOptions): void {
   getTextarea("question")?.addEventListener("keydown", (event) => {
     const keyboardEvent = event as KeyboardEvent;
+    if (isImeComposing(keyboardEvent)) return;
     if (keyboardEvent.key === "Escape") {
       keyboardEvent.preventDefault();
       setDockState("collapsed", options);
@@ -211,6 +213,7 @@ function bindEvents(options: InlineBubbleOptions): void {
   });
   getTextarea("mini-question")?.addEventListener("keydown", (event) => {
     const keyboardEvent = event as KeyboardEvent;
+    if (isImeComposing(keyboardEvent)) return;
     if (keyboardEvent.key === "Escape") {
       keyboardEvent.preventDefault();
       setDockState("collapsed", options);
@@ -273,6 +276,17 @@ function bindEvents(options: InlineBubbleOptions): void {
   shadow?.querySelectorAll<HTMLElement>("[data-role='drag-handle']").forEach((handle) => {
     handle.addEventListener("pointerdown", startDrag);
   });
+}
+
+function focusComposer(): void {
+  window.setTimeout(() => {
+    const textarea = getTextarea("question");
+    textarea?.focus();
+  }, 0);
+}
+
+function isImeComposing(event: KeyboardEvent): boolean {
+  return event.isComposing || event.key === "Process" || event.keyCode === 229;
 }
 
 function renderBubble(options: InlineBubbleOptions): void {
@@ -610,6 +624,7 @@ function mergeReadingContext(nextContext: ReadingContext, previousContext: Readi
     selectedHtml: nextContext.selectedHtml || previousContext.selectedHtml,
     surroundingText: nextContext.surroundingText || previousContext.surroundingText,
     visualAssets: nextContext.visualAssets?.length ? nextContext.visualAssets : previousContext.visualAssets,
+    linkedPages: nextContext.linkedPages?.length ? nextContext.linkedPages : previousContext.linkedPages,
   };
 }
 
@@ -745,6 +760,7 @@ function renderContextChips(): string {
     ...(currentContext.visualAssets?.length
       ? [`<span class="chip">${currentContext.visualAssets.length} 个画面</span>`]
       : []),
+    ...(currentContext.linkedPages?.length ? [`<span class="chip">${currentContext.linkedPages.length} 个链接</span>`] : []),
     `<span class="chip chip-title">${escapeHtml(currentContext.source.site || currentContext.source.title || "网页")}</span>`,
   ];
   return chips.join("");
@@ -1003,6 +1019,15 @@ function sanitizeContextForHistory(context: ReadingContext): ReadingContext {
       frameCount: asset.frameCount,
       sampleDelayMs: asset.sampleDelayMs,
       capturedAt: asset.capturedAt,
+    })),
+    linkedPages: context.linkedPages?.map((page) => ({
+      url: page.url,
+      title: page.title,
+      site: page.site,
+      description: trimInlineText(page.description, 500),
+      text: trimInlineText(page.text, 1800),
+      fetchedAt: page.fetchedAt,
+      error: page.error,
     })),
     capturedAt: context.capturedAt,
   };

@@ -341,6 +341,7 @@ function App(): React.ReactElement {
           }}
           placeholder="问一个问题，或写下保存理由"
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
             if (event.key === "Enter" && !event.shiftKey && !isBusy) {
               event.preventDefault();
               void runAsk("freeform");
