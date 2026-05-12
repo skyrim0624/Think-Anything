@@ -17,6 +17,7 @@ import type {
   PromoteSourceRequest,
   RetrieveRequest,
 } from "@twyr/shared";
+import { DEFAULT_CODEX_MODEL, type TwyrModelReasoningEffort } from "@twyr/shared";
 
 const config = loadConfig();
 const vault = new VaultService(config);
@@ -167,6 +168,10 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
   const contextScope = body.contextScope ?? (responseMode === "fast" ? "selection" : "page");
   const sessionId =
     body.sessionId ?? `session-${shortHash(`${prepared.context.source.url}:${prepared.context.capturedAt}`)}`;
+  const model = body.model?.trim() || DEFAULT_CODEX_MODEL;
+  const modelReasoningEffort = normalizeReasoningEffort(
+    body.modelReasoningEffort ?? (responseMode === "fast" ? "low" : "xhigh"),
+  );
   const decision =
     responseMode === "fast" && !body.forceRetrieval && mode !== "connect"
       ? {
@@ -192,7 +197,7 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
   });
   let output: Awaited<ReturnType<typeof runCodexPrompt>>;
   try {
-    output = await runCodexPrompt(prompt, config, prepared.assets);
+    output = await runCodexPrompt(prompt, config, prepared.assets, { model, modelReasoningEffort });
   } catch (error) {
     if (isCodexAuthError(error)) {
       harness.writeTrace({
@@ -203,6 +208,8 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
         responseMode,
         contextScope,
         sessionId,
+        model,
+        modelReasoningEffort,
         retrieval: decision,
         error: "Codex 登录不可用",
         durationMs: Date.now() - startedAt,
@@ -233,6 +240,8 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
     responseMode,
     contextScope,
     sessionId,
+    model,
+    modelReasoningEffort,
     retrieval: decision,
     saveRecommendation: parsed.saveRecommendation,
     answer: parsed.answer,
@@ -246,6 +255,8 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
     responseMode,
     contextScope,
     sessionId,
+    model,
+    modelReasoningEffort,
     retrieval: decision,
     saveRecommendation: parsed.saveRecommendation,
     threadPath,
@@ -253,6 +264,13 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
     rawModelOutput: parsed.rawModelOutput,
   };
   sendJson(response, 200, result);
+}
+
+function normalizeReasoningEffort(value: string): TwyrModelReasoningEffort {
+  if (value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh") {
+    return value;
+  }
+  return "low";
 }
 
 function isAuthenticated(request: IncomingMessage): boolean {

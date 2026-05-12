@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { Codex } from "@openai/codex-sdk";
+import type { TwyrModelReasoningEffort } from "@twyr/shared";
 import type { BridgeConfig } from "./config.js";
 
 export interface CodexRunOutput {
@@ -10,6 +11,11 @@ export interface CodexRunOutput {
 
 export interface CodexVisualInput {
   path: string;
+}
+
+export interface CodexRunOptions {
+  model?: string;
+  modelReasoningEffort?: TwyrModelReasoningEffort;
 }
 
 export class CodexAuthError extends Error {
@@ -43,6 +49,7 @@ export async function runCodexPrompt(
   prompt: string,
   config: BridgeConfig,
   visualInputs: CodexVisualInput[] = [],
+  runOptions: CodexRunOptions = {},
 ): Promise<CodexRunOutput> {
   try {
     const codex = new Codex({
@@ -54,6 +61,8 @@ export async function runCodexPrompt(
       approvalPolicy: "never",
       skipGitRepoCheck: true,
       webSearchMode: "disabled",
+      model: runOptions.model,
+      modelReasoningEffort: runOptions.modelReasoningEffort,
     });
     const input = visualInputs.length
       ? [
@@ -75,7 +84,7 @@ export async function runCodexPrompt(
     }
     return {
       runtime: "cli",
-      text: await runCodexCli(prompt, config, visualInputs),
+      text: await runCodexCli(prompt, config, visualInputs, runOptions),
     };
   }
 }
@@ -91,14 +100,25 @@ function normalizeCodexResult(result: unknown): string {
   return JSON.stringify(result, null, 2);
 }
 
-function runCodexCli(prompt: string, config: BridgeConfig, visualInputs: CodexVisualInput[]): Promise<string> {
+function runCodexCli(
+  prompt: string,
+  config: BridgeConfig,
+  visualInputs: CodexVisualInput[],
+  runOptions: CodexRunOptions,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const imageArgs = visualInputs.flatMap((visual) => ["--image", visual.path]);
+    const modelArgs = runOptions.model ? ["--model", runOptions.model] : [];
+    const reasoningArgs = runOptions.modelReasoningEffort
+      ? ["--config", `model_reasoning_effort="${runOptions.modelReasoningEffort}"`]
+      : [];
     const child = spawn(
       config.codexCommand,
       [
         "exec",
         "--json",
+        ...modelArgs,
+        ...reasoningArgs,
         ...imageArgs,
         "--cd",
         config.vaultPath,

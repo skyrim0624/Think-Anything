@@ -3,6 +3,7 @@ export const TWYR_FULL_NAME = "Think Anytime";
 export const DEFAULT_BRIDGE_URL = "http://127.0.0.1:47321";
 export const DEFAULT_VAULT_PATH = "~/Documents/TWYR";
 export const DEFAULT_AGENT_MEMORY_PATH = "~/Documents/Agent-Memory";
+export const DEFAULT_CODEX_MODEL = "gpt-5.5";
 
 export type TwyrActionMode =
   | "explain"
@@ -25,6 +26,7 @@ export type TwyrCardType =
 export type RetrievalDecisionType = "skip" | "search" | "forceSearch";
 export type TwyrResponseMode = "fast" | "deep";
 export type TwyrContextScope = "selection" | "page";
+export type TwyrModelReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface SourceMetadata {
   url: string;
@@ -116,6 +118,8 @@ export interface AskRequest {
   responseMode?: TwyrResponseMode;
   contextScope?: TwyrContextScope;
   sessionId?: string;
+  model?: string;
+  modelReasoningEffort?: TwyrModelReasoningEffort;
   forceRetrieval?: boolean;
   conversation?: TwyrConversationMessage[];
 }
@@ -126,6 +130,8 @@ export interface AskResponse {
   responseMode: TwyrResponseMode;
   contextScope: TwyrContextScope;
   sessionId: string;
+  model: string;
+  modelReasoningEffort: TwyrModelReasoningEffort;
   retrieval: RetrievalDecision;
   saveRecommendation: SaveRecommendation;
   threadPath: string;

@@ -26,6 +26,8 @@ export interface HarnessTraceParams {
   responseMode?: string;
   contextScope?: string;
   sessionId?: string;
+  model?: string;
+  modelReasoningEffort?: string;
   retrieval?: RetrievalDecision;
   saveRecommendation?: SaveRecommendation;
   answer?: string;
@@ -78,6 +80,8 @@ export class HarnessService {
       responseMode: params.responseMode,
       contextScope: params.contextScope,
       sessionId: params.sessionId,
+      model: params.model,
+      modelReasoningEffort: params.modelReasoningEffort,
       retrieval: params.retrieval ? summarizeRetrieval(params.retrieval) : undefined,
       saveRecommendation: params.saveRecommendation,
       answerSummary: trimText(params.answer, 1600),
