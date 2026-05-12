@@ -46,6 +46,7 @@ export function buildAskPrompt(params: {
     "- 简单术语解释要短；观点判断、项目关联、写作素材要展开。",
     "- 如果用户问题是追问，先参考本页对话历史，但不要把上一轮回答当成网页事实来源。",
     "- 如果当前上下文包含视觉附件，Codex 已收到对应截图；回答时要明确哪些判断来自画面，哪些只是根据页面文字推测。",
+    "- 如果视觉附件包含视频多帧，按帧序列理解可见变化；不要声称看到了完整视频、音频或未采样片段。",
     "- 全文入库只能建议，不能当成已经保存。",
     isFast
       ? "- 当前是极速模式：优先直接回答用户问题，不做完整知识库整理；保存建议保持保守。"
@@ -109,6 +110,9 @@ function buildContextPayload(context: ReadingContext, responseMode: TwyrResponse
       sourceUrl: asset.sourceUrl,
       alt: asset.alt,
       vaultPath: asset.vaultPath,
+      frameIndex: asset.frameIndex,
+      frameCount: asset.frameCount,
+      sampleDelayMs: asset.sampleDelayMs,
       capturedAt: asset.capturedAt,
     })),
     capturedAt: context.capturedAt,

@@ -12,6 +12,9 @@ export interface PreparedVisualAsset {
   vaultPath: string;
   sourceUrl?: string;
   alt?: string;
+  frameIndex?: number;
+  frameCount?: number;
+  sampleDelayMs?: number;
 }
 
 export interface PreparedVisualContext {
@@ -66,6 +69,9 @@ function persistVisualAsset(
     vaultPath,
     sourceUrl: asset.sourceUrl,
     alt: asset.alt,
+    frameIndex: asset.frameIndex,
+    frameCount: asset.frameCount,
+    sampleDelayMs: asset.sampleDelayMs,
   };
 }
 

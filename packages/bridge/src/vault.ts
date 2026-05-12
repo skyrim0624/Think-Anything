@@ -271,6 +271,9 @@ function formatVisualAssets(assets: ReadingContext["visualAssets"]): string {
       const imageLink = asset.vaultPath ? `![[${asset.vaultPath}]]` : "";
       const details = [
         `- 类型：${asset.type}`,
+        typeof asset.frameIndex === "number" && asset.frameCount
+          ? `- 视频帧：${asset.frameIndex + 1}/${asset.frameCount}（+${asset.sampleDelayMs ?? 0}ms）`
+          : "",
         asset.sourceUrl ? `- 来源：${asset.sourceUrl}` : "",
         asset.alt ? `- 描述：${asset.alt}` : "",
       ].filter(Boolean);

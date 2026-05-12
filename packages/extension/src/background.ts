@@ -19,6 +19,7 @@ let standaloneOpenPromise: Promise<void> | undefined;
 const MAX_VISUAL_ASSETS = 3;
 const VISUAL_PADDING = 18;
 const MAX_VISUAL_DIMENSION = 1280;
+const VIDEO_SAMPLE_DELAYS_MS = [0, 700, 1400] as const;
 
 chrome.runtime.onInstalled.addListener(() => {
   void setupContextMenus();
@@ -175,28 +176,67 @@ async function captureVisualContext(context: ReadingContext, sourceTabId?: numbe
 
   try {
     const windowId = sourceTabId ? (await chrome.tabs.get(sourceTabId)).windowId : undefined;
-    const screenshot =
-      typeof windowId === "number"
-        ? await chrome.tabs.captureVisibleTab(windowId, { format: "png" })
-        : await chrome.tabs.captureVisibleTab({ format: "png" });
-    const image = await loadImageBitmap(screenshot);
-    const viewport = context.viewport ?? inferViewportFromBitmap(image);
-    const visualAssets = await Promise.all(
-      (context.visualAssets ?? []).map(async (asset) => {
-        if (!asset.rect || asset.dataUrl || !candidates.some((candidate) => candidate.id === asset.id)) return asset;
-        return {
-          ...asset,
-          dataUrl: await cropVisualAsset(image, viewport, asset.rect),
-          mimeType: "image/jpeg",
-          capturedAt: new Date().toISOString(),
-        };
-      }),
-    );
-    image.close();
+    const hasVideoCandidate = candidates.some((asset) => asset.type === "video");
+    const snapshots = await captureVisibleSnapshots(windowId, hasVideoCandidate ? VIDEO_SAMPLE_DELAYS_MS : [0]);
+    const firstImage = snapshots[0]?.image;
+    if (!firstImage) return context;
+    const viewport = context.viewport ?? inferViewportFromBitmap(firstImage);
+    const visualAssets = (
+      await Promise.all(
+        (context.visualAssets ?? []).map(async (asset) => {
+          if (!asset.rect || asset.dataUrl || !candidates.some((candidate) => candidate.id === asset.id)) return [asset];
+          const rect = asset.rect;
+          if (asset.type === "video") {
+            return Promise.all(
+              snapshots.map(async (snapshot, frameIndex) => ({
+                ...asset,
+                id: `${asset.id}-frame-${frameIndex + 1}`,
+                label: `${asset.label} · 帧 ${frameIndex + 1}/${snapshots.length}`,
+                dataUrl: await cropVisualAsset(snapshot.image, viewport, rect),
+                mimeType: "image/jpeg",
+                frameIndex,
+                frameCount: snapshots.length,
+                sampleDelayMs: snapshot.delayMs,
+                capturedAt: new Date().toISOString(),
+              })),
+            );
+          }
+          return [
+            {
+              ...asset,
+              dataUrl: await cropVisualAsset(firstImage, viewport, asset.rect),
+              mimeType: "image/jpeg",
+              capturedAt: new Date().toISOString(),
+            },
+          ];
+        }),
+      )
+    ).flat();
+    snapshots.forEach((snapshot) => snapshot.image.close());
     return { ...context, visualAssets };
   } catch {
     return context;
   }
+}
+
+async function captureVisibleSnapshots(
+  windowId: number | undefined,
+  delaysMs: readonly number[],
+): Promise<Array<{ delayMs: number; image: ImageBitmap }>> {
+  const snapshots: Array<{ delayMs: number; image: ImageBitmap }> = [];
+  for (const delayMs of delaysMs) {
+    if (delayMs > 0) await wait(delayMs);
+    const screenshot =
+      typeof windowId === "number"
+        ? await chrome.tabs.captureVisibleTab(windowId, { format: "png" })
+        : await chrome.tabs.captureVisibleTab({ format: "png" });
+    snapshots.push({ delayMs, image: await loadImageBitmap(screenshot) });
+  }
+  return snapshots;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
 }
 
 async function loadImageBitmap(dataUrl: string): Promise<ImageBitmap> {

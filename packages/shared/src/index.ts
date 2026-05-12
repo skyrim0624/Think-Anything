@@ -64,6 +64,9 @@ export interface VisualAsset {
   mimeType?: string;
   dataUrl?: string;
   vaultPath?: string;
+  frameIndex?: number;
+  frameCount?: number;
+  sampleDelayMs?: number;
   capturedAt?: string;
 }
 

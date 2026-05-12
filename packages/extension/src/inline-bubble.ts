@@ -96,6 +96,7 @@ let lastSaveRecommendation: SaveRecommendation | undefined;
 let lastSavedAt = 0;
 let isBusy = false;
 let activeRequestId = 0;
+const pendingRequests = new Map<string, number>();
 let sessionId = createSessionId();
 let resizeBound = false;
 let dragState:
@@ -251,14 +252,14 @@ function bindEvents(options: InlineBubbleOptions): void {
   });
   getButton("new")?.addEventListener("click", () => resetConversation(options));
   getButton("send")?.addEventListener("click", () => {
-    if (isBusy) {
+    if (isCurrentConversationBusy()) {
       stopActiveRequest(options);
       return;
     }
     void sendQuestion(options);
   });
   getButton("mini-send")?.addEventListener("click", () => {
-    if (isBusy) {
+    if (isCurrentConversationBusy()) {
       stopActiveRequest(options);
       return;
     }
@@ -276,6 +277,7 @@ function bindEvents(options: InlineBubbleOptions): void {
 
 function renderBubble(options: InlineBubbleOptions): void {
   if (!shadow) return;
+  const currentBusy = isBusy || isCurrentConversationBusy();
   const root = shadow.querySelector<HTMLElement>("[data-role='dock']");
   const messageList = shadow.querySelector<HTMLElement>("[data-role='messages']");
   const chips = shadow.querySelector<HTMLElement>("[data-role='context-chips']");
@@ -292,7 +294,7 @@ function renderBubble(options: InlineBubbleOptions): void {
 
   if (root) root.dataset.state = dockState;
   if (chips) chips.innerHTML = renderContextChips();
-  if (modeLabel) modeLabel.textContent = isBusy ? `${formatReasoningPreset()} 思考中` : formatReasoningPreset();
+  if (modeLabel) modeLabel.textContent = currentBusy ? `${formatReasoningPreset()} 思考中` : formatReasoningPreset();
   if (modelSelect) modelSelect.value = dockModel;
   if (reasoningSelect) reasoningSelect.value = dockReasoningPreset;
   if (messageList) {
@@ -306,16 +308,16 @@ function renderBubble(options: InlineBubbleOptions): void {
     historyPanel.hidden = !historyOpen;
     bindHistoryButtons(options);
   }
-  if (sendButton) sendButton.textContent = isBusy ? "停止" : "发送";
-  if (miniSendButton) miniSendButton.textContent = isBusy ? "停止" : "发送";
+  if (sendButton) sendButton.textContent = currentBusy ? "停止" : "发送";
+  if (miniSendButton) miniSendButton.textContent = currentBusy ? "停止" : "发送";
   if (saveButton) saveButton.textContent = Date.now() - lastSavedAt < 1600 ? "已保存" : "保存";
-  if (saveButton) saveButton.toggleAttribute("disabled", isBusy || !currentContext);
+  if (saveButton) saveButton.toggleAttribute("disabled", currentBusy || !currentContext);
   if (saveButton) saveButton.title = buildSaveButtonTitle();
-  if (retrieveButton) retrieveButton.toggleAttribute("disabled", isBusy || !currentContext);
-  if (promoteButton) promoteButton.toggleAttribute("disabled", isBusy || !currentContext);
+  if (retrieveButton) retrieveButton.toggleAttribute("disabled", currentBusy || !currentContext);
+  if (promoteButton) promoteButton.toggleAttribute("disabled", currentBusy || !currentContext);
   if (promoteButton) promoteButton.title = "确认后将当前页面全文写入 Think Anytime 长期资料库";
   if (retryButton) retryButton.hidden = !lastQuestion;
-  if (retryButton) retryButton.toggleAttribute("disabled", isBusy || !lastQuestion);
+  if (retryButton) retryButton.toggleAttribute("disabled", currentBusy || !lastQuestion);
   for (const textarea of [getTextarea("question"), getTextarea("mini-question")]) {
     if (textarea && !textarea.value.trim() && !lastQuestion) textarea.placeholder = DEFAULT_QUESTION;
   }
@@ -326,61 +328,85 @@ async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: str
   const fullTextarea = getTextarea("question");
   const miniTextarea = getTextarea("mini-question");
   const question = overrideQuestion?.trim() || fullTextarea?.value.trim() || miniTextarea?.value.trim() || DEFAULT_QUESTION;
-  if (isBusy || !question) return;
+  if (isBusy || isCurrentConversationBusy() || !question) return;
   const responseMode = dockReasoningPreset === "xhigh" ? "deep" : "fast";
   const contextScope: TwyrContextScope = responseMode === "deep" ? "page" : "selection";
   const modelReasoningEffort: TwyrModelReasoningEffort = dockReasoningPreset === "xhigh" ? "xhigh" : "low";
   currentContext = prepareContextForSend(options, contextScope);
 
   const conversation = buildConversationHistory();
+  const requestSessionId = sessionId;
+  const requestContext = currentContext;
+  const requestModel = dockModel;
+  const requestReasoningPreset = dockReasoningPreset;
   const requestId = activeRequestId + 1;
   activeRequestId = requestId;
+  pendingRequests.set(requestSessionId, requestId);
   lastQuestion = question;
   messages.push({ role: "user", content: question });
   if (fullTextarea) fullTextarea.value = "";
   if (miniTextarea) miniTextarea.value = "";
-  isBusy = true;
   setDockState("expanded", options, false);
   renderBubble(options);
+  void saveCurrentConversation();
 
   try {
     const response = await sendInlineRequest<AskResponse>({
       type: "TWYR_INLINE_ASK",
       body: {
-        context: currentContext,
+        context: requestContext,
         question,
         mode: "freeform",
         responseMode,
         contextScope,
-        sessionId,
-        model: dockModel,
+        sessionId: requestSessionId,
+        model: requestModel,
         modelReasoningEffort,
         conversation,
       },
     });
-    if (requestId !== activeRequestId) return;
-    sessionId = response.sessionId || sessionId;
-    lastAnswer = response.answer;
-    lastThreadPath = response.threadPath;
-    lastSaveRecommendation = response.saveRecommendation;
-    messages.push({ role: "assistant", content: response.answer, response });
-  } catch (error) {
-    if (requestId !== activeRequestId) return;
-    messages.push({ role: "system", content: error instanceof Error ? error.message : String(error) });
-  } finally {
-    if (requestId === activeRequestId) {
-      isBusy = false;
-      renderBubble(options);
+    if (pendingRequests.get(requestSessionId) !== requestId) return;
+    pendingRequests.delete(requestSessionId);
+    if (sessionId === requestSessionId) {
+      sessionId = response.sessionId || sessionId;
+      lastAnswer = response.answer;
+      lastThreadPath = response.threadPath;
+      lastSaveRecommendation = response.saveRecommendation;
+      messages.push({ role: "assistant", content: response.answer, response });
       void saveCurrentConversation();
+    } else {
+      upsertConversationResponse({
+        requestSessionId,
+        context: requestContext,
+        question,
+        response,
+        model: requestModel,
+        reasoningPreset: requestReasoningPreset,
+      });
+      void persistConversationHistory();
+    }
+  } catch (error) {
+    if (pendingRequests.get(requestSessionId) !== requestId) return;
+    pendingRequests.delete(requestSessionId);
+    const content = error instanceof Error ? error.message : String(error);
+    if (sessionId === requestSessionId) {
+      messages.push({ role: "system", content });
+      void saveCurrentConversation();
+    } else {
+      upsertConversationSystemMessage(requestSessionId, requestContext, question, content, requestModel, requestReasoningPreset);
+      void persistConversationHistory();
+    }
+  } finally {
+    if (sessionId === requestSessionId) {
+      renderBubble(options);
       getTextarea("question")?.focus();
     }
   }
 }
 
 function stopActiveRequest(options: InlineBubbleOptions): void {
-  if (!isBusy) return;
-  activeRequestId += 1;
-  isBusy = false;
+  if (!isCurrentConversationBusy()) return;
+  pendingRequests.delete(sessionId);
   messages.push({ role: "system", content: "已停止等待；如果原请求稍后返回，本窗口会忽略那次结果。" });
   renderBubble(options);
   void saveCurrentConversation();
@@ -388,12 +414,12 @@ function stopActiveRequest(options: InlineBubbleOptions): void {
 }
 
 async function retryLastQuestion(options: InlineBubbleOptions): Promise<void> {
-  if (!lastQuestion || isBusy) return;
+  if (!lastQuestion || isBusy || isCurrentConversationBusy()) return;
   await sendQuestion(options, lastQuestion);
 }
 
 async function saveCurrentThread(options: InlineBubbleOptions): Promise<void> {
-  if (isBusy) return;
+  if (isBusy || isCurrentConversationBusy()) return;
   if (!currentContext) currentContext = options.captureContext("selection");
   isBusy = true;
   renderBubble(options);
@@ -449,7 +475,7 @@ function buildCapturePlan(context: ReadingContext): { level: CaptureLevel; cardT
 }
 
 async function retrieveRelatedNotes(options: InlineBubbleOptions): Promise<void> {
-  if (isBusy) return;
+  if (isBusy || isCurrentConversationBusy()) return;
   if (!currentContext) currentContext = options.captureContext("selection");
   const query = getTextarea("question")?.value.trim() || currentContext.selectionText || currentContext.source.title;
   isBusy = true;
@@ -480,7 +506,7 @@ async function retrieveRelatedNotes(options: InlineBubbleOptions): Promise<void>
 }
 
 async function promoteCurrentSource(options: InlineBubbleOptions): Promise<void> {
-  if (isBusy) return;
+  if (isBusy || isCurrentConversationBusy()) return;
   const confirmed = window.confirm("确认将当前页面全文保存到 Think Anytime 的 10-SOURCES 吗？");
   if (!confirmed) {
     messages.push({ role: "system", content: "已取消全文入库。" });
@@ -732,10 +758,11 @@ function renderHistoryPanel(): string {
     .slice(0, MAX_HISTORY_SESSIONS)
     .map((conversation) => {
       const activeClass = conversation.sessionId === sessionId ? " history-item-active" : "";
+      const pendingLabel = pendingRequests.has(conversation.sessionId) ? " · 思考中" : "";
       const lastMessage = conversation.messages.at(-1)?.content || conversation.title;
       return `<button class="history-item${activeClass}" type="button" data-history-id="${escapeHtml(conversation.id)}">
         <span class="history-title">${escapeHtml(conversation.title)}</span>
-        <span class="history-meta">${escapeHtml(formatHistoryTime(conversation.updatedAt))}${conversation.site ? ` · ${escapeHtml(conversation.site)}` : ""}</span>
+        <span class="history-meta">${escapeHtml(formatHistoryTime(conversation.updatedAt))}${conversation.site ? ` · ${escapeHtml(conversation.site)}` : ""}${pendingLabel}</span>
         <span class="history-snippet">${escapeHtml(trimInlineText(lastMessage, 86))}</span>
       </button>`;
     })
@@ -779,6 +806,10 @@ function bindHistoryButtons(options: InlineBubbleOptions): void {
   });
 }
 
+function isCurrentConversationBusy(): boolean {
+  return pendingRequests.has(sessionId);
+}
+
 async function loadConversationHistory(options: InlineBubbleOptions): Promise<void> {
   try {
     const stored = await chrome.storage.local.get(CONVERSATION_HISTORY_KEY);
@@ -792,18 +823,25 @@ async function loadConversationHistory(options: InlineBubbleOptions): Promise<vo
 
 async function saveCurrentConversation(): Promise<void> {
   if (!messages.length || !currentContext) return;
+  upsertConversationSnapshot(buildCurrentConversationSnapshot());
+  await persistConversationHistory();
+}
+
+function buildCurrentConversationSnapshot(): StoredDockConversation {
+  if (!currentContext) throw new Error("当前会话缺少阅读上下文。");
+  const context = currentContext;
   const now = Date.now();
   const existing = historySessions.find((conversation) => conversation.sessionId === sessionId);
-  const record: StoredDockConversation = {
+  return {
     id: existing?.id || sessionId,
     sessionId,
-    title: currentContext.source.title || "未命名阅读对话",
-    sourceUrl: currentContext.source.url,
-    site: currentContext.source.site,
+    title: context.source.title || "未命名阅读对话",
+    sourceUrl: context.source.url,
+    site: context.source.site,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     threadPath: lastThreadPath || existing?.threadPath,
-    context: sanitizeContextForHistory(currentContext),
+    context: sanitizeContextForHistory(context),
     messages: messages.slice(-MAX_STORED_MESSAGES).map((message) => ({
       role: message.role,
       content: trimInlineText(message.content, 4000),
@@ -815,14 +853,87 @@ async function saveCurrentConversation(): Promise<void> {
     model: dockModel,
     reasoningPreset: dockReasoningPreset,
   };
-  historySessions = [record, ...historySessions.filter((conversation) => conversation.sessionId !== sessionId)]
+}
+
+function upsertConversationSnapshot(record: StoredDockConversation): void {
+  historySessions = [record, ...historySessions.filter((conversation) => conversation.sessionId !== record.sessionId)]
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, MAX_HISTORY_SESSIONS);
+}
+
+async function persistConversationHistory(): Promise<void> {
   try {
     await chrome.storage.local.set({ [CONVERSATION_HISTORY_KEY]: historySessions });
   } catch (error) {
     console.warn("[Think Anytime] 无法保存历史对话", error);
   }
+}
+
+function upsertConversationResponse(params: {
+  requestSessionId: string;
+  context: ReadingContext;
+  question: string;
+  response: AskResponse;
+  model: string;
+  reasoningPreset: DockReasoningPreset;
+}): void {
+  const existing = historySessions.find((conversation) => conversation.sessionId === params.requestSessionId);
+  const messagesForRecord = existing?.messages.length
+    ? existing.messages
+    : [{ role: "user" as const, content: trimInlineText(params.question, 4000) }];
+  upsertConversationSnapshot({
+    id: existing?.id || params.requestSessionId,
+    sessionId: params.requestSessionId,
+    title: existing?.title || params.context.source.title || "未命名阅读对话",
+    sourceUrl: params.context.source.url,
+    site: params.context.source.site,
+    createdAt: existing?.createdAt || Date.now(),
+    updatedAt: Date.now(),
+    threadPath: params.response.threadPath,
+    context: sanitizeContextForHistory(params.context),
+    messages: [
+      ...messagesForRecord,
+      { role: "assistant" as const, content: trimInlineText(params.response.answer, 4000) },
+    ].slice(-MAX_STORED_MESSAGES),
+    lastQuestion: params.question,
+    lastAnswer: trimInlineText(params.response.answer, 4000),
+    lastSaveRecommendation: params.response.saveRecommendation,
+    model: params.model,
+    reasoningPreset: params.reasoningPreset,
+  });
+}
+
+function upsertConversationSystemMessage(
+  requestSessionId: string,
+  context: ReadingContext,
+  question: string,
+  content: string,
+  model: string,
+  reasoningPreset: DockReasoningPreset,
+): void {
+  const existing = historySessions.find((conversation) => conversation.sessionId === requestSessionId);
+  const messagesForRecord = existing?.messages.length
+    ? existing.messages
+    : [{ role: "user" as const, content: trimInlineText(question, 4000) }];
+  upsertConversationSnapshot({
+    id: existing?.id || requestSessionId,
+    sessionId: requestSessionId,
+    title: existing?.title || context.source.title || "未命名阅读对话",
+    sourceUrl: context.source.url,
+    site: context.source.site,
+    createdAt: existing?.createdAt || Date.now(),
+    updatedAt: Date.now(),
+    threadPath: existing?.threadPath,
+    context: sanitizeContextForHistory(context),
+    messages: [...messagesForRecord, { role: "system" as const, content: trimInlineText(content, 4000) }].slice(
+      -MAX_STORED_MESSAGES,
+    ),
+    lastQuestion: question,
+    lastAnswer: existing?.lastAnswer,
+    lastSaveRecommendation: existing?.lastSaveRecommendation,
+    model,
+    reasoningPreset,
+  });
 }
 
 function restoreConversation(id: string, options: InlineBubbleOptions): void {
@@ -888,6 +999,9 @@ function sanitizeContextForHistory(context: ReadingContext): ReadingContext {
       alt: asset.alt,
       mimeType: asset.mimeType,
       vaultPath: asset.vaultPath,
+      frameIndex: asset.frameIndex,
+      frameCount: asset.frameCount,
+      sampleDelayMs: asset.sampleDelayMs,
       capturedAt: asset.capturedAt,
     })),
     capturedAt: context.capturedAt,
