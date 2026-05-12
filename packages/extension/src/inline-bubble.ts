@@ -38,6 +38,9 @@ interface InlineMessage {
   content: string;
   response?: AskResponse;
   feedbackRating?: FeedbackRating;
+  status?: "thinking" | "stopped" | "error";
+  requestId?: number;
+  sessionId?: string;
 }
 
 interface DockPosition {
@@ -57,7 +60,7 @@ type InlineApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
 const HOST_ID = "twyr-inline-bubble-host";
 const DOCK_STORAGE_KEY = "twyr.dock.state.v1";
 const CONVERSATION_HISTORY_KEY = "twyr.dock.conversations.v1";
-const EXPANDED_WIDTH = 520;
+const EXPANDED_WIDTH = 560;
 const MINI_WIDTH = 360;
 const COLLAPSED_WIDTH = 62;
 const DEFAULT_QUESTION = "解释这段内容，并指出它是否值得保存。";
@@ -442,6 +445,14 @@ async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: str
   pendingRequests.set(requestSessionId, requestId);
   lastQuestion = question;
   messages.push({ role: "user", content: question });
+  const thinkingMessage: InlineMessage = {
+    role: "system",
+    content: buildThinkingMessage(requestModel, requestReasoningPreset, responseMode),
+    status: "thinking",
+    requestId,
+    sessionId: requestSessionId,
+  };
+  messages.push(thinkingMessage);
   if (fullTextarea) fullTextarea.value = "";
   if (miniTextarea) miniTextarea.value = "";
   setDockState("expanded", options, false);
@@ -470,6 +481,7 @@ async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: str
       lastAnswer = response.answer;
       lastThreadPath = response.threadPath;
       lastSaveRecommendation = response.saveRecommendation;
+      removeThinkingMessage(requestSessionId, requestId);
       messages.push({ role: "assistant", content: response.answer, response });
       void saveCurrentConversation();
     } else {
@@ -488,7 +500,11 @@ async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: str
     pendingRequests.delete(requestSessionId);
     const content = error instanceof Error ? error.message : String(error);
     if (sessionId === requestSessionId) {
-      messages.push({ role: "system", content });
+      replaceThinkingMessage(requestSessionId, requestId, {
+        role: "system",
+        content,
+        status: "error",
+      });
       void saveCurrentConversation();
     } else {
       upsertConversationSystemMessage(requestSessionId, requestContext, question, content, requestModel, requestReasoningPreset);
@@ -504,8 +520,17 @@ async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: str
 
 function stopActiveRequest(options: InlineBubbleOptions): void {
   if (!isCurrentConversationBusy()) return;
+  const stoppedRequestId = pendingRequests.get(sessionId);
   pendingRequests.delete(sessionId);
-  messages.push({ role: "system", content: "已停止等待；如果原请求稍后返回，本窗口会忽略那次结果。" });
+  if (typeof stoppedRequestId === "number") {
+    replaceThinkingMessage(sessionId, stoppedRequestId, {
+      role: "system",
+      content: "已停止等待；如果原请求稍后返回，本窗口会忽略那次结果。",
+      status: "stopped",
+    });
+  } else {
+    messages.push({ role: "system", content: "已停止等待；如果原请求稍后返回，本窗口会忽略那次结果。", status: "stopped" });
+  }
   renderBubble(options);
   void saveCurrentConversation();
   restorePageSelection();
@@ -830,11 +855,32 @@ function buildConversationHistory(): TwyrConversationMessage[] {
     .slice(-8);
 }
 
+function buildThinkingMessage(model: string, preset: DockReasoningPreset, responseMode: string): string {
+  const mode = preset === "xhigh" ? "深度思考" : "快速思考";
+  const scope = responseMode === "deep" ? "整页上下文" : "选区上下文";
+  return `${model} 正在${mode} · ${scope}`;
+}
+
+function removeThinkingMessage(targetSessionId: string, requestId: number): void {
+  messages = messages.filter((message) => message.sessionId !== targetSessionId || message.requestId !== requestId);
+}
+
+function replaceThinkingMessage(targetSessionId: string, requestId: number, nextMessage: InlineMessage): void {
+  const index = messages.findIndex((message) => message.sessionId === targetSessionId && message.requestId === requestId);
+  if (index >= 0) {
+    messages[index] = nextMessage;
+    return;
+  }
+  messages.push(nextMessage);
+}
+
 function renderMessage(message: InlineMessage, index: number): string {
   const longClass = message.role === "assistant" && message.content.length > 1200 ? " message-long" : "";
-  return `<article class="message message-${message.role}${longClass}">
+  const statusClass = message.status ? ` message-${message.status}` : "";
+  return `<article class="message message-${message.role}${longClass}${statusClass}">
     <div class="message-role">${roleLabel(message.role)}</div>
     <div class="message-body">${escapeHtml(message.content)}</div>
+    ${message.status === "thinking" ? '<div class="thinking-dots" aria-hidden="true"><span></span><span></span><span></span></div>' : ""}
     ${renderFeedbackControls(message, index)}
   </article>`;
 }
@@ -1443,6 +1489,20 @@ function buildShell(): string {
         background: #fbfcfc;
       }
 
+      .message-thinking {
+        border-color: rgba(17, 24, 39, 0.14);
+        background: #f8fafc;
+      }
+
+      .message-stopped {
+        color: #6b7280;
+      }
+
+      .message-error {
+        border-color: rgba(185, 28, 28, 0.28);
+        background: #fff7f7;
+      }
+
       .message-role {
         margin-bottom: 4px;
         color: #6b7280;
@@ -1462,6 +1522,41 @@ function buildShell(): string {
         max-height: 180px;
         overflow: auto;
         padding-right: 4px;
+      }
+
+      .thinking-dots {
+        display: inline-flex;
+        gap: 4px;
+        margin-top: 8px;
+      }
+
+      .thinking-dots span {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: #6b7280;
+        animation: twyr-pulse 900ms ease-in-out infinite;
+      }
+
+      .thinking-dots span:nth-child(2) {
+        animation-delay: 120ms;
+      }
+
+      .thinking-dots span:nth-child(3) {
+        animation-delay: 240ms;
+      }
+
+      @keyframes twyr-pulse {
+        0%,
+        80%,
+        100% {
+          opacity: 0.3;
+          transform: translateY(0);
+        }
+        40% {
+          opacity: 1;
+          transform: translateY(-2px);
+        }
       }
 
       .feedback-actions {
@@ -1803,6 +1898,15 @@ function buildShell(): string {
           background: rgba(248, 250, 252, 0.04);
         }
 
+        .message-thinking {
+          background: rgba(248, 250, 252, 0.07);
+        }
+
+        .message-error {
+          border-color: rgba(248, 113, 113, 0.34);
+          background: rgba(127, 29, 29, 0.28);
+        }
+
         .send-button {
           border-color: #f8fafc;
           background: #f8fafc;
@@ -1817,8 +1921,10 @@ function buildShell(): string {
       }
 
       @media (prefers-reduced-motion: reduce) {
-        button {
+        button,
+        .thinking-dots span {
           transition-duration: 0.01ms !important;
+          animation-duration: 0.01ms !important;
         }
       }
 
