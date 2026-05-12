@@ -23,6 +23,9 @@ export interface HarnessTraceParams {
   context?: ReadingContext;
   question?: string;
   mode?: string;
+  responseMode?: string;
+  contextScope?: string;
+  sessionId?: string;
   retrieval?: RetrievalDecision;
   saveRecommendation?: SaveRecommendation;
   answer?: string;
@@ -72,6 +75,9 @@ export class HarnessService {
       visualAssetCount: params.context?.visualAssets?.length ?? 0,
       question: trimText(params.question, 1000),
       mode: params.mode,
+      responseMode: params.responseMode,
+      contextScope: params.contextScope,
+      sessionId: params.sessionId,
       retrieval: params.retrieval ? summarizeRetrieval(params.retrieval) : undefined,
       saveRecommendation: params.saveRecommendation,
       answerSummary: trimText(params.answer, 1600),

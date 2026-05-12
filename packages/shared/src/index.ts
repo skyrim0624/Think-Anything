@@ -23,6 +23,8 @@ export type TwyrCardType =
   | "quote";
 
 export type RetrievalDecisionType = "skip" | "search" | "forceSearch";
+export type TwyrResponseMode = "fast" | "deep";
+export type TwyrContextScope = "selection" | "page";
 
 export interface SourceMetadata {
   url: string;
@@ -111,6 +113,9 @@ export interface AskRequest {
   context: ReadingContext;
   question: string;
   mode?: TwyrActionMode;
+  responseMode?: TwyrResponseMode;
+  contextScope?: TwyrContextScope;
+  sessionId?: string;
   forceRetrieval?: boolean;
   conversation?: TwyrConversationMessage[];
 }
@@ -118,6 +123,9 @@ export interface AskRequest {
 export interface AskResponse {
   answer: string;
   mode: TwyrActionMode;
+  responseMode: TwyrResponseMode;
+  contextScope: TwyrContextScope;
+  sessionId: string;
   retrieval: RetrievalDecision;
   saveRecommendation: SaveRecommendation;
   threadPath: string;

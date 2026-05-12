@@ -3,8 +3,10 @@ import type {
   ReadingContext,
   RetrievalDecision,
   SaveRecommendation,
+  TwyrContextScope,
   TwyrConversationMessage,
   TwyrActionMode,
+  TwyrResponseMode,
 } from "@twyr/shared";
 import { trimText } from "./markdown.js";
 
@@ -25,9 +27,12 @@ export function buildAskPrompt(params: {
   context: ReadingContext;
   question: string;
   mode: TwyrActionMode;
+  responseMode: TwyrResponseMode;
+  contextScope: TwyrContextScope;
   retrieval: RetrievalDecision;
   conversation?: TwyrConversationMessage[];
 }): string {
+  const isFast = params.responseMode === "fast";
   return [
     "你是 Think Anytime（原 TWYR：Thinking, when you are reading!）的本地阅读思考代理。",
     "",
@@ -42,25 +47,39 @@ export function buildAskPrompt(params: {
     "- 如果用户问题是追问，先参考本页对话历史，但不要把上一轮回答当成网页事实来源。",
     "- 如果当前上下文包含视觉附件，Codex 已收到对应截图；回答时要明确哪些判断来自画面，哪些只是根据页面文字推测。",
     "- 全文入库只能建议，不能当成已经保存。",
+    isFast
+      ? "- 当前是极速模式：优先直接回答用户问题，不做完整知识库整理；保存建议保持保守。"
+      : "- 当前是深度模式：可以结合旧笔记、较完整网页上下文和保存判断展开。",
     "",
-    "保存分级：",
-    "- scratch：临时解释，不建议长期保存。",
-    "- card：值得形成问题卡、洞察卡、术语卡、观点卡或反驳卡。",
-    "- thread：围绕当前文章的讨论记录，默认保留。",
-    "- source：建议用户确认后全文入库。",
-    "",
-    "输出格式：只输出一个 JSON 对象，不要 Markdown 代码块，不要额外解释。",
-    "{",
-    '  "answer": "对用户问题的回答",',
-    '  "saveRecommendation": {',
-    '    "level": "scratch|card|thread|source",',
-    '    "cardType": "question|insight|claim|counterpoint|term|quote",',
-    '    "shouldPromoteSource": false,',
-    '    "reason": "为什么这样沉淀或不沉淀"',
-    "  }",
-    "}",
+    ...(isFast
+      ? [
+          "输出格式：只输出一个 JSON 对象，不要 Markdown 代码块，不要额外解释。",
+          "{",
+          '  "answer": "对用户问题的回答"',
+          "}",
+        ]
+      : [
+          "保存分级：",
+          "- scratch：临时解释，不建议长期保存。",
+          "- card：值得形成问题卡、洞察卡、术语卡、观点卡或反驳卡。",
+          "- thread：围绕当前文章的讨论记录，默认保留。",
+          "- source：建议用户确认后全文入库。",
+          "",
+          "输出格式：只输出一个 JSON 对象，不要 Markdown 代码块，不要额外解释。",
+          "{",
+          '  "answer": "对用户问题的回答",',
+          '  "saveRecommendation": {',
+          '    "level": "scratch|card|thread|source",',
+          '    "cardType": "question|insight|claim|counterpoint|term|quote",',
+          '    "shouldPromoteSource": false,',
+          '    "reason": "为什么这样沉淀或不沉淀"',
+          "  }",
+          "}",
+        ]),
     "",
     `模式：${params.mode}`,
+    `回答速度：${params.responseMode}`,
+    `上下文范围：${params.contextScope}`,
     `用户问题：${params.question}`,
     "",
     "检索决策：",
@@ -69,26 +88,37 @@ export function buildAskPrompt(params: {
     "本页对话历史：",
     buildConversationPrompt(params.conversation),
     "",
-    "当前网页上下文：",
-    JSON.stringify(
-      {
-        ...params.context,
-        visualAssets: params.context.visualAssets?.map((asset) => ({
-          id: asset.id,
-          type: asset.type,
-          label: asset.label,
-          sourceUrl: asset.sourceUrl,
-          alt: asset.alt,
-          vaultPath: asset.vaultPath,
-          capturedAt: asset.capturedAt,
-        })),
-        pageText: trimText(params.context.pageText, 5000),
-        pageMarkdown: trimText(params.context.pageMarkdown, 9000),
-      },
-      null,
-      2,
-    ),
+    isFast ? "当前网页上下文（极速裁剪）：" : "当前网页上下文：",
+    JSON.stringify(buildContextPayload(params.context, params.responseMode), null, 2),
   ].join("\n");
+}
+
+function buildContextPayload(context: ReadingContext, responseMode: TwyrResponseMode): Record<string, unknown> {
+  const base = {
+    source: context.source,
+    selectionText: trimText(context.selectionText, responseMode === "fast" ? 2600 : 8000),
+    selectedHtml: responseMode === "fast" ? undefined : trimText(context.selectedHtml, 4000),
+    surroundingText: trimText(context.surroundingText, responseMode === "fast" ? 3200 : 8000),
+    headings: context.headings?.slice(0, responseMode === "fast" ? 8 : 30),
+    highlights: context.highlights?.slice(0, 8),
+    viewport: context.viewport,
+    visualAssets: context.visualAssets?.map((asset) => ({
+      id: asset.id,
+      type: asset.type,
+      label: asset.label,
+      sourceUrl: asset.sourceUrl,
+      alt: asset.alt,
+      vaultPath: asset.vaultPath,
+      capturedAt: asset.capturedAt,
+    })),
+    capturedAt: context.capturedAt,
+  };
+  if (responseMode === "fast") return base;
+  return {
+    ...base,
+    pageText: trimText(context.pageText, 5000),
+    pageMarkdown: trimText(context.pageMarkdown, 9000),
+  };
 }
 
 function buildConversationPrompt(conversation: TwyrConversationMessage[] | undefined): string {

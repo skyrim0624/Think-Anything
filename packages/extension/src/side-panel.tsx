@@ -115,6 +115,8 @@ function App(): React.ReactElement {
         context: visualContext,
         question: effectiveQuestion,
         mode,
+        responseMode: mode === "freeform" && !forceRetrieval ? "fast" : "deep",
+        contextScope: mode === "freeform" && !forceRetrieval ? "selection" : "page",
         forceRetrieval,
       });
       setMessages((current) => [...current, { role: "assistant", content: response.answer, response }]);

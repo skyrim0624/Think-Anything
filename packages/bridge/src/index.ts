@@ -7,6 +7,7 @@ import { buildAskPrompt, parseModelAnswer } from "./prompt.js";
 import { RetrievalService } from "./retrieval.js";
 import { VaultService } from "./vault.js";
 import { prepareVisualContext } from "./visual-assets.js";
+import { shortHash } from "./markdown.js";
 import type {
   AskRequest,
   AskResponse,
@@ -162,16 +163,30 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
   const body = await readJson<AskRequest>(request);
   const prepared = prepareVisualContext(body.context, config);
   const mode = body.mode ?? "freeform";
-  const decision = retrieval.decideAndSearch({
-    context: prepared.context,
-    query: body.question,
-    mode,
-    force: body.forceRetrieval,
-  });
+  const responseMode = body.responseMode ?? (body.forceRetrieval || mode === "connect" ? "deep" : "fast");
+  const contextScope = body.contextScope ?? (responseMode === "fast" ? "selection" : "page");
+  const sessionId =
+    body.sessionId ?? `session-${shortHash(`${prepared.context.source.url}:${prepared.context.capturedAt}`)}`;
+  const decision =
+    responseMode === "fast" && !body.forceRetrieval && mode !== "connect"
+      ? {
+          type: "skip" as const,
+          reason: "极速模式默认不查库；用户点击查库或进入深度模式时再检索。",
+          query: body.question.trim(),
+          notes: [],
+        }
+      : retrieval.decideAndSearch({
+          context: prepared.context,
+          query: body.question,
+          mode,
+          force: body.forceRetrieval,
+        });
   const prompt = buildAskPrompt({
     context: prepared.context,
     question: body.question,
     mode,
+    responseMode,
+    contextScope,
     retrieval: decision,
     conversation: body.conversation,
   });
@@ -185,6 +200,9 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
         context: prepared.context,
         question: body.question,
         mode,
+        responseMode,
+        contextScope,
+        sessionId,
         retrieval: decision,
         error: "Codex 登录不可用",
         durationMs: Date.now() - startedAt,
@@ -206,12 +224,15 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
     retrieval: decision,
     recommendation: parsed.saveRecommendation,
   });
-  retrieval.refreshIndex(true);
+  retrieval.refreshIndex(responseMode === "deep");
   const trace = harness.writeTrace({
     action: "ask",
     context: prepared.context,
     question: body.question,
     mode,
+    responseMode,
+    contextScope,
+    sessionId,
     retrieval: decision,
     saveRecommendation: parsed.saveRecommendation,
     answer: parsed.answer,
@@ -222,6 +243,9 @@ async function handleAsk(request: IncomingMessage, response: ServerResponse): Pr
   const result: AskResponse = {
     answer: parsed.answer,
     mode,
+    responseMode,
+    contextScope,
+    sessionId,
     retrieval: decision,
     saveRecommendation: parsed.saveRecommendation,
     threadPath,
