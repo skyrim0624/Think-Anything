@@ -52,7 +52,7 @@
         "default": "Alt+S",
         "mac": "Alt+S"
       },
-      "description": "在选区旁打开 Think Anytime 原位对话框"
+      "description": "展开 Think Anytime Dock 并附加当前上下文"
     },
     "open_twyr": {
       "suggested_key": {

@@ -71,6 +71,14 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     void setToolbarEnabled(tab.id, false);
     return;
   }
+  if (info.menuItemId === MENU_IDS.explain || info.menuItemId === MENU_IDS.visual) {
+    void sendContentCommand(tab.id, { type: "TWYR_OPEN_INLINE" });
+    return;
+  }
+  if (info.menuItemId === MENU_IDS.capture) {
+    void sendContentCommand(tab.id, { type: "TWYR_INLINE_QUICK_SAVE" });
+    return;
+  }
   const action = actionFromMenu(info.menuItemId);
   if (!action) return;
   if (info.selectionText && action.kind === "ask") {

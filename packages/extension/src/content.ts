@@ -1,5 +1,5 @@
-import type { ReadingContext, VisualAsset, VisualRect } from "@twyr/shared";
-import { closeInlineBubble, openInlineBubble, quickSaveInlineSelection } from "./inline-bubble.js";
+import type { ReadingContext, TwyrContextScope, VisualAsset, VisualRect } from "@twyr/shared";
+import { closeInlineBubble, ensureInlineDock, openInlineBubble, quickSaveInlineSelection } from "./inline-bubble.js";
 import type { RuntimeMessage } from "./messages.js";
 
 const TOOLBAR_ID = "twyr-selection-toolbar";
@@ -15,7 +15,7 @@ let lastPointer: { x: number; y: number; time: number } | undefined;
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
   if (message.type === "TWYR_GET_CONTEXT") {
-    sendResponse({ context: captureReadingContext() });
+    sendResponse({ context: captureReadingContext("page") });
     return true;
   }
   if (message.type === "TWYR_SET_TOOLBAR_ENABLED") {
@@ -101,13 +101,15 @@ document.addEventListener("keydown", (event) => {
   }
 }, true);
 
-function captureReadingContext(): ReadingContext {
+ensureInlineDock({ captureContext: captureReadingContext, showToast });
+
+function captureReadingContext(scope: TwyrContextScope = "page"): ReadingContext {
   const selection = window.getSelection();
   const selectionText = selection?.toString().trim() || "";
   const selectedHtml = selection && selection.rangeCount > 0 ? serializeSelection(selection) : "";
   const mainElement = findMainElement();
   const pageText = normalizeWhitespace(mainElement.innerText || document.body.innerText || "");
-  const pageMarkdown = elementToMarkdown(mainElement);
+  const pageMarkdown = scope === "page" ? elementToMarkdown(mainElement) : "";
   const visualAssets = captureVisualAssets(selection);
   return {
     source: {
@@ -123,7 +125,7 @@ function captureReadingContext(): ReadingContext {
     selectionText,
     selectedHtml,
     surroundingText: buildSurroundingText(selectionText, pageText),
-    pageText: pageText.slice(0, 60_000),
+    pageText: pageText.slice(0, scope === "page" ? 60_000 : 8_000),
     pageMarkdown: pageMarkdown.slice(0, 80_000),
     headings: Array.from(mainElement.querySelectorAll("h1,h2,h3"))
       .map((heading) => normalizeWhitespace(heading.textContent || ""))
@@ -393,12 +395,21 @@ function createDisableButton(): HTMLButtonElement {
 }
 
 async function openTwyrFromToolbar(mode: "explain" | "challenge" | "connect" | "capture"): Promise<void> {
-  const kind = mode === "capture" ? "capture" : "ask";
+  if (mode === "explain") {
+    openInlineBubble({ captureContext: captureReadingContext, showToast });
+    hideToolbar();
+    return;
+  }
+  if (mode === "capture") {
+    await quickSaveInlineSelection({ captureContext: captureReadingContext, showToast });
+    hideToolbar();
+    return;
+  }
   try {
     const response = await chrome.runtime.sendMessage({
       type: "TWYR_OPEN_PANEL",
       action: {
-        kind,
+        kind: "ask",
         mode,
         question: mode === "connect" ? "结合我的旧笔记，帮我理解这段内容。" : undefined,
         createdAt: Date.now(),

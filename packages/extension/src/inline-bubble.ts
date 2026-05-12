@@ -1,23 +1,25 @@
 import type {
   AskResponse,
-  CaptureResponse,
   CaptureLevel,
+  CaptureResponse,
   FeedbackRating,
   PromoteSourceResponse,
   ReadingContext,
   RetrieveResponse,
   SaveRecommendation,
   TwyrCardType,
+  TwyrContextScope,
   TwyrConversationMessage,
 } from "@twyr/shared";
 import type { PendingAction, RuntimeMessage } from "./messages.js";
 
 interface InlineBubbleOptions {
-  captureContext: () => ReadingContext;
+  captureContext: (scope?: TwyrContextScope) => ReadingContext;
   showToast: (text: string) => void;
 }
 
 type InlineRole = "user" | "assistant" | "system";
+type DockState = "collapsed" | "mini" | "expanded";
 
 interface InlineMessage {
   role: InlineRole;
@@ -26,17 +28,31 @@ interface InlineMessage {
   feedbackRating?: FeedbackRating;
 }
 
+interface DockPosition {
+  left: number;
+  top: number;
+}
+
+interface PersistedDockState {
+  state?: DockState;
+  position?: DockPosition;
+}
+
 type InlineApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
 const HOST_ID = "twyr-inline-bubble-host";
-const MAX_WIDTH = 420;
-const MIN_WIDTH = 320;
+const DOCK_STORAGE_KEY = "twyr.dock.state.v1";
+const EXPANDED_WIDTH = 430;
+const MINI_WIDTH = 360;
+const COLLAPSED_WIDTH = 62;
 const DEFAULT_QUESTION = "解释这段内容，并指出它是否值得保存。";
 
 let host: HTMLDivElement | undefined;
 let shadow: ShadowRoot | undefined;
 let currentContext: ReadingContext | undefined;
 let messages: InlineMessage[] = [];
+let dockState: DockState = "collapsed";
+let dockPosition: DockPosition | undefined;
 let lastQuestion = "";
 let lastAnswer = "";
 let lastThreadPath = "";
@@ -44,27 +60,34 @@ let lastSaveRecommendation: SaveRecommendation | undefined;
 let lastSavedAt = 0;
 let isBusy = false;
 let activeRequestId = 0;
+let sessionId = createSessionId();
+let resizeBound = false;
+let dragState:
+  | {
+      pointerId: number;
+      startX: number;
+      startY: number;
+      startLeft: number;
+      startTop: number;
+    }
+  | undefined;
+
+export function ensureInlineDock(options: InlineBubbleOptions): void {
+  ensureBubble(options);
+  renderBubble(options);
+}
 
 export function openInlineBubble(options: InlineBubbleOptions): void {
-  currentContext = options.captureContext();
-  logCaptureDetails(currentContext);
-  messages = [];
-  lastQuestion = "";
-  lastAnswer = "";
-  lastThreadPath = "";
-  lastSaveRecommendation = undefined;
-  lastSavedAt = 0;
-  isBusy = false;
-  activeRequestId += 1;
   ensureBubble(options);
-  positionBubble();
-  renderBubble(options);
-  options.showToast("Think Anytime：原位对话已打开");
-  getTextarea()?.focus();
+  currentContext = options.captureContext("selection");
+  logCaptureDetails(currentContext);
+  setDockState("expanded", options);
+  options.showToast("Think Anytime：上下文已附加");
+  getTextarea("question")?.focus();
 }
 
 export async function quickSaveInlineSelection(options: InlineBubbleOptions): Promise<void> {
-  const context = options.captureContext();
+  const context = options.captureContext("selection");
   if (!context.selectionText && !context.visualAssets?.length) {
     options.showToast("Think Anytime：请先选中文本或指向图片/视频再快速保存");
     return;
@@ -88,48 +111,72 @@ export async function quickSaveInlineSelection(options: InlineBubbleOptions): Pr
 }
 
 export function closeInlineBubble(): void {
-  host?.remove();
-  host = undefined;
-  shadow = undefined;
-  currentContext = undefined;
-  messages = [];
-  lastQuestion = "";
-  lastAnswer = "";
-  lastThreadPath = "";
-  lastSaveRecommendation = undefined;
-  lastSavedAt = 0;
-  isBusy = false;
-  activeRequestId += 1;
+  if (!host || !shadow) return;
+  setDockState("collapsed");
 }
 
 function ensureBubble(options: InlineBubbleOptions): void {
   if (host && shadow) return;
+  const persisted = loadDockState();
+  dockState = persisted.state ?? "collapsed";
+  dockPosition = persisted.position;
   host = document.createElement("div");
   host.id = HOST_ID;
   Object.assign(host.style, {
     position: "fixed",
     zIndex: "2147483647",
-    width: `${MAX_WIDTH}px`,
   });
   shadow = host.attachShadow({ mode: "open" });
   shadow.innerHTML = buildShell();
   bindEvents(options);
   document.documentElement.appendChild(host);
+  if (!resizeBound) {
+    resizeBound = true;
+    window.addEventListener("resize", () => {
+      dockPosition = clampPosition(dockPosition ?? defaultPosition(dockState), getDockWidth(dockState));
+      saveDockState();
+      applyDockPosition();
+    });
+  }
 }
 
 function bindEvents(options: InlineBubbleOptions): void {
-  const textarea = getTextarea();
-  textarea?.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeInlineBubble();
+  getTextarea("question")?.addEventListener("keydown", (event) => {
+    const keyboardEvent = event as KeyboardEvent;
+    if (keyboardEvent.key === "Escape") {
+      keyboardEvent.preventDefault();
+      setDockState("collapsed", options);
       return;
     }
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
+    if (keyboardEvent.key === "Enter" && !keyboardEvent.shiftKey) {
+      keyboardEvent.preventDefault();
       void sendQuestion(options);
     }
   });
+  getTextarea("mini-question")?.addEventListener("keydown", (event) => {
+    const keyboardEvent = event as KeyboardEvent;
+    if (keyboardEvent.key === "Escape") {
+      keyboardEvent.preventDefault();
+      setDockState("collapsed", options);
+      return;
+    }
+    if (keyboardEvent.key === "Enter") {
+      keyboardEvent.preventDefault();
+      void sendQuestion(options, getTextarea("mini-question")?.value.trim());
+    }
+  });
+  getButton("open")?.addEventListener("click", () => {
+    currentContext = options.captureContext("selection");
+    setDockState("mini", options);
+    getTextarea("mini-question")?.focus();
+  });
+  getButton("expand-dock")?.addEventListener("click", () => {
+    if (!currentContext) currentContext = options.captureContext("selection");
+    setDockState("expanded", options);
+    getTextarea("question")?.focus();
+  });
+  getButton("collapse")?.addEventListener("click", () => setDockState("collapsed", options));
+  getButton("new")?.addEventListener("click", () => resetConversation(options));
   getButton("send")?.addEventListener("click", () => {
     if (isBusy) {
       stopActiveRequest(options);
@@ -137,41 +184,47 @@ function bindEvents(options: InlineBubbleOptions): void {
     }
     void sendQuestion(options);
   });
+  getButton("mini-send")?.addEventListener("click", () => {
+    if (isBusy) {
+      stopActiveRequest(options);
+      return;
+    }
+    void sendQuestion(options, getTextarea("mini-question")?.value.trim());
+  });
   getButton("retry")?.addEventListener("click", () => void retryLastQuestion(options));
   getButton("save")?.addEventListener("click", () => void saveCurrentThread(options));
   getButton("retrieve")?.addEventListener("click", () => void retrieveRelatedNotes(options));
   getButton("promote")?.addEventListener("click", () => void promoteCurrentSource(options));
   getButton("expand")?.addEventListener("click", () => void openExpandedWorkbench());
-  getButton("close")?.addEventListener("click", closeInlineBubble);
+  shadow?.querySelectorAll<HTMLElement>("[data-role='drag-handle']").forEach((handle) => {
+    handle.addEventListener("pointerdown", startDrag);
+  });
 }
 
 function renderBubble(options: InlineBubbleOptions): void {
-  if (!shadow || !currentContext) return;
+  if (!shadow) return;
+  const root = shadow.querySelector<HTMLElement>("[data-role='dock']");
   const messageList = shadow.querySelector<HTMLElement>("[data-role='messages']");
+  const chips = shadow.querySelector<HTMLElement>("[data-role='context-chips']");
   const sendButton = getButton("send");
+  const miniSendButton = getButton("mini-send");
   const saveButton = getButton("save");
   const retrieveButton = getButton("retrieve");
   const promoteButton = getButton("promote");
   const retryButton = getButton("retry");
-  const textarea = getTextarea();
+  const modeLabel = shadow.querySelector<HTMLElement>("[data-role='mode-label']");
 
+  if (root) root.dataset.state = dockState;
+  if (chips) chips.innerHTML = renderContextChips();
+  if (modeLabel) modeLabel.textContent = isBusy ? "快速回答中" : "极速默认";
   if (messageList) {
-    messageList.innerHTML = messages
-      .map((message, index) => {
-        const longClass = message.role === "assistant" && message.content.length > 1200 ? " message-long" : "";
-        return `<article class="message message-${message.role}${longClass}">
-          <div class="message-role">${roleLabel(message.role)}</div>
-          <div class="message-body">${escapeHtml(message.content)}</div>
-          ${renderFeedbackControls(message, index)}
-        </article>`;
-      })
-      .join("");
+    messageList.innerHTML = messages.map(renderMessage).join("");
     messageList.hidden = messages.length === 0;
     messageList.scrollTop = messageList.scrollHeight;
     bindFeedbackButtons(options);
   }
   if (sendButton) sendButton.textContent = isBusy ? "停止" : "发送";
-  if (sendButton) sendButton.toggleAttribute("disabled", !currentContext);
+  if (miniSendButton) miniSendButton.textContent = isBusy ? "停止" : "发送";
   if (saveButton) saveButton.textContent = Date.now() - lastSavedAt < 1600 ? "已保存" : "保存";
   if (saveButton) saveButton.toggleAttribute("disabled", isBusy || !currentContext);
   if (saveButton) saveButton.title = buildSaveButtonTitle();
@@ -180,23 +233,28 @@ function renderBubble(options: InlineBubbleOptions): void {
   if (promoteButton) promoteButton.title = "确认后将当前页面全文写入 Think Anytime 长期资料库";
   if (retryButton) retryButton.hidden = !lastQuestion;
   if (retryButton) retryButton.toggleAttribute("disabled", isBusy || !lastQuestion);
-  if (textarea && !textarea.value.trim() && !lastQuestion) textarea.placeholder = DEFAULT_QUESTION;
-
-  positionBubble();
+  for (const textarea of [getTextarea("question"), getTextarea("mini-question")]) {
+    if (textarea && !textarea.value.trim() && !lastQuestion) textarea.placeholder = DEFAULT_QUESTION;
+  }
+  applyDockPosition();
 }
 
 async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: string): Promise<void> {
-  const textarea = getTextarea();
-  const question = overrideQuestion?.trim() || textarea?.value.trim() || DEFAULT_QUESTION;
-  if (!currentContext || isBusy || !question) return;
+  const fullTextarea = getTextarea("question");
+  const miniTextarea = getTextarea("mini-question");
+  const question = overrideQuestion?.trim() || fullTextarea?.value.trim() || miniTextarea?.value.trim() || DEFAULT_QUESTION;
+  if (isBusy || !question) return;
+  if (!currentContext) currentContext = options.captureContext("selection");
 
   const conversation = buildConversationHistory();
   const requestId = activeRequestId + 1;
   activeRequestId = requestId;
   lastQuestion = question;
   messages.push({ role: "user", content: question });
-  if (textarea) textarea.value = "";
+  if (fullTextarea) fullTextarea.value = "";
+  if (miniTextarea) miniTextarea.value = "";
   isBusy = true;
+  setDockState("expanded", options, false);
   renderBubble(options);
 
   try {
@@ -206,10 +264,14 @@ async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: str
         context: currentContext,
         question,
         mode: "freeform",
+        responseMode: "fast",
+        contextScope: "selection",
+        sessionId,
         conversation,
       },
     });
     if (requestId !== activeRequestId) return;
+    sessionId = response.sessionId || sessionId;
     lastAnswer = response.answer;
     lastThreadPath = response.threadPath;
     lastSaveRecommendation = response.saveRecommendation;
@@ -221,7 +283,7 @@ async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: str
     if (requestId === activeRequestId) {
       isBusy = false;
       renderBubble(options);
-      textarea?.focus();
+      getTextarea("question")?.focus();
     }
   }
 }
@@ -232,7 +294,7 @@ function stopActiveRequest(options: InlineBubbleOptions): void {
   isBusy = false;
   messages.push({ role: "system", content: "已停止等待；如果原请求稍后返回，本窗口会忽略那次结果。" });
   renderBubble(options);
-  getTextarea()?.focus();
+  getTextarea("question")?.focus();
 }
 
 async function retryLastQuestion(options: InlineBubbleOptions): Promise<void> {
@@ -241,7 +303,8 @@ async function retryLastQuestion(options: InlineBubbleOptions): Promise<void> {
 }
 
 async function saveCurrentThread(options: InlineBubbleOptions): Promise<void> {
-  if (!currentContext || isBusy) return;
+  if (isBusy) return;
+  if (!currentContext) currentContext = options.captureContext("selection");
   isBusy = true;
   renderBubble(options);
   try {
@@ -274,9 +337,9 @@ function buildCapturePlan(context: ReadingContext): { level: CaptureLevel; cardT
   const fallbackCardType: TwyrCardType = context.selectionText ? "quote" : "insight";
   const fallbackReason = lastQuestion
     ? context.visualAssets?.length
-      ? "用户在 Inline Codex 对话中保存了视觉材料、问题和回答。"
-      : "用户在 Inline Codex 对话中保存了选区、问题和回答。"
-    : "用户在 Inline Codex 对话中保存了当前阅读上下文。";
+      ? "用户在 Think Anytime Dock 中保存了视觉材料、问题和回答。"
+      : "用户在 Think Anytime Dock 中保存了选区、问题和回答。"
+    : "用户在 Think Anytime Dock 中保存了当前阅读上下文。";
   if (!lastSaveRecommendation) {
     return {
       level: "card",
@@ -294,31 +357,10 @@ function buildCapturePlan(context: ReadingContext): { level: CaptureLevel; cardT
   };
 }
 
-function logCaptureDetails(context: ReadingContext): void {
-  console.info("[Think Anytime] Inline context captured", {
-    title: context.source.title,
-    site: context.source.site,
-    selectionLength: context.selectionText?.length ?? 0,
-    visualAssets: context.visualAssets?.map((asset) => ({
-      id: asset.id,
-      type: asset.type,
-      label: asset.label,
-      sourceUrl: asset.sourceUrl,
-      rect: asset.rect,
-    })) ?? [],
-  });
-}
-
-function buildSaveButtonTitle(): string {
-  if (!lastSaveRecommendation) return "保存到 Think Anytime";
-  const level = lastSaveRecommendation.level === "source" ? "card" : lastSaveRecommendation.level;
-  return `按 AI 建议保存为 ${level}/${lastSaveRecommendation.cardType}`;
-}
-
 async function retrieveRelatedNotes(options: InlineBubbleOptions): Promise<void> {
-  const textarea = getTextarea();
-  if (!currentContext || isBusy) return;
-  const query = textarea?.value.trim() || currentContext.selectionText || currentContext.source.title;
+  if (isBusy) return;
+  if (!currentContext) currentContext = options.captureContext("selection");
+  const query = getTextarea("question")?.value.trim() || currentContext.selectionText || currentContext.source.title;
   isBusy = true;
   renderBubble(options);
   try {
@@ -346,7 +388,7 @@ async function retrieveRelatedNotes(options: InlineBubbleOptions): Promise<void>
 }
 
 async function promoteCurrentSource(options: InlineBubbleOptions): Promise<void> {
-  if (!currentContext || isBusy) return;
+  if (isBusy) return;
   const confirmed = window.confirm("确认将当前页面全文保存到 Think Anytime 的 10-SOURCES 吗？");
   if (!confirmed) {
     messages.push({ role: "system", content: "已取消全文入库。" });
@@ -357,6 +399,7 @@ async function promoteCurrentSource(options: InlineBubbleOptions): Promise<void>
   isBusy = true;
   renderBubble(options);
   try {
+    currentContext = options.captureContext("page");
     const response = await sendInlineRequest<PromoteSourceResponse>({
       type: "TWYR_INLINE_PROMOTE_SOURCE",
       body: {
@@ -383,7 +426,7 @@ async function openExpandedWorkbench(): Promise<void> {
   const action: PendingAction = {
     kind: "ask",
     mode: "freeform",
-    question: getTextarea()?.value.trim() || lastQuestion || DEFAULT_QUESTION,
+    question: getTextarea("question")?.value.trim() || getTextarea("mini-question")?.value.trim() || lastQuestion || DEFAULT_QUESTION,
     createdAt: Date.now(),
   };
   await chrome.runtime.sendMessage({ type: "TWYR_OPEN_PANEL", action, preferStandalone: true });
@@ -415,13 +458,106 @@ async function sendInlineFeedback(
   }
 }
 
+function resetConversation(options: InlineBubbleOptions): void {
+  messages = [];
+  lastQuestion = "";
+  lastAnswer = "";
+  lastThreadPath = "";
+  lastSaveRecommendation = undefined;
+  lastSavedAt = 0;
+  activeRequestId += 1;
+  isBusy = false;
+  sessionId = createSessionId();
+  currentContext = options.captureContext("selection");
+  renderBubble(options);
+  getTextarea("question")?.focus();
+}
+
+function setDockState(nextState: DockState, options?: InlineBubbleOptions, shouldRender = true): void {
+  dockState = nextState;
+  dockPosition = clampPosition(dockPosition ?? defaultPosition(nextState), getDockWidth(nextState));
+  saveDockState();
+  if (shouldRender && options) renderBubble(options);
+  else applyDockPosition();
+}
+
+function applyDockPosition(): void {
+  if (!host) return;
+  const width = getDockWidth(dockState);
+  dockPosition = clampPosition(dockPosition ?? defaultPosition(dockState), width);
+  host.style.width = `${width}px`;
+  host.style.left = `${dockPosition.left}px`;
+  host.style.top = `${dockPosition.top}px`;
+}
+
+function getDockWidth(state: DockState): number {
+  if (state === "collapsed") return COLLAPSED_WIDTH;
+  if (state === "mini") return Math.max(300, Math.min(MINI_WIDTH, window.innerWidth - 24));
+  return Math.max(320, Math.min(EXPANDED_WIDTH, window.innerWidth - 24));
+}
+
+function defaultPosition(state: DockState): DockPosition {
+  const width = getDockWidth(state);
+  const height = state === "expanded" ? 420 : state === "mini" ? 96 : 62;
+  return {
+    left: Math.max(12, window.innerWidth - width - 24),
+    top: Math.max(12, window.innerHeight - height - 24),
+  };
+}
+
+function clampPosition(position: DockPosition, width: number): DockPosition {
+  const estimatedHeight = dockState === "expanded" ? 560 : dockState === "mini" ? 118 : 64;
+  return {
+    left: clamp(position.left, 12, Math.max(12, window.innerWidth - width - 12)),
+    top: clamp(position.top, 12, Math.max(12, window.innerHeight - estimatedHeight - 12)),
+  };
+}
+
+function startDrag(event: PointerEvent): void {
+  if (!host) return;
+  const target = event.currentTarget;
+  if (!(target instanceof HTMLElement)) return;
+  event.preventDefault();
+  target.setPointerCapture(event.pointerId);
+  dockPosition = dockPosition ?? defaultPosition(dockState);
+  dragState = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    startLeft: dockPosition.left,
+    startTop: dockPosition.top,
+  };
+  window.addEventListener("pointermove", moveDrag, true);
+  window.addEventListener("pointerup", stopDrag, true);
+}
+
+function moveDrag(event: PointerEvent): void {
+  if (!dragState || event.pointerId !== dragState.pointerId) return;
+  dockPosition = clampPosition(
+    {
+      left: dragState.startLeft + event.clientX - dragState.startX,
+      top: dragState.startTop + event.clientY - dragState.startY,
+    },
+    getDockWidth(dockState),
+  );
+  applyDockPosition();
+}
+
+function stopDrag(event: PointerEvent): void {
+  if (!dragState || event.pointerId !== dragState.pointerId) return;
+  dragState = undefined;
+  saveDockState();
+  window.removeEventListener("pointermove", moveDrag, true);
+  window.removeEventListener("pointerup", stopDrag, true);
+}
+
 function buildSourceSummary(): string {
   if (!lastAnswer) return "待整理。";
   return `最近一次 Think Anytime 回答摘要：\n\n${lastAnswer.slice(0, 1800)}`;
 }
 
 function buildPromoteReason(): string {
-  const reasons = ["用户在 Inline Bubble 中确认全文入库。"];
+  const reasons = ["用户在 Think Anytime Dock 中确认全文入库。"];
   if (lastSaveRecommendation?.shouldPromoteSource) {
     reasons.push(`AI 入库建议：${lastSaveRecommendation.reason}`);
   }
@@ -447,37 +583,35 @@ function buildConversationHistory(): TwyrConversationMessage[] {
     .map((message) => ({
       role: message.role,
       content: message.content,
-    }));
+    }))
+    .slice(-8);
 }
 
-function positionBubble(): void {
-  if (!host) return;
-  const width = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, window.innerWidth - 24));
-  const rect = getSelectionRect();
-  const left = rect
-    ? clamp(rect.left, 12, window.innerWidth - width - 12)
-    : clamp((window.innerWidth - width) / 2, 12, window.innerWidth - width - 12);
-  const preferredTop = rect ? rect.bottom + 10 : 88;
-  const estimatedHeight = 360;
-  const top =
-    preferredTop + estimatedHeight > window.innerHeight && rect
-      ? Math.max(12, rect.top - estimatedHeight - 10)
-      : clamp(preferredTop, 12, Math.max(12, window.innerHeight - 120));
-  host.style.width = `${width}px`;
-  host.style.left = `${left}px`;
-  host.style.top = `${top}px`;
+function renderMessage(message: InlineMessage, index: number): string {
+  const longClass = message.role === "assistant" && message.content.length > 1200 ? " message-long" : "";
+  return `<article class="message message-${message.role}${longClass}">
+    <div class="message-role">${roleLabel(message.role)}</div>
+    <div class="message-body">${escapeHtml(message.content)}</div>
+    ${renderFeedbackControls(message, index)}
+  </article>`;
 }
 
-function getSelectionRect(): DOMRect | null {
-  const selection = window.getSelection();
-  if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
-  const rect = selection.getRangeAt(0).getBoundingClientRect();
-  if (!rect.width && !rect.height) return null;
-  return rect;
+function renderContextChips(): string {
+  if (!currentContext) return '<span class="chip chip-muted">未附加上下文</span>';
+  const chips = [
+    currentContext.selectionText
+      ? `<span class="chip">选区 ${currentContext.selectionText.length} 字</span>`
+      : '<span class="chip chip-muted">整页</span>',
+    ...(currentContext.visualAssets?.length
+      ? [`<span class="chip">${currentContext.visualAssets.length} 个画面</span>`]
+      : []),
+    `<span class="chip chip-title">${escapeHtml(currentContext.source.site || currentContext.source.title || "网页")}</span>`,
+  ];
+  return chips.join("");
 }
 
-function getTextarea(): HTMLTextAreaElement | null {
-  return shadow?.querySelector<HTMLTextAreaElement>("[data-role='question']") ?? null;
+function getTextarea(role: "question" | "mini-question"): HTMLTextAreaElement | HTMLInputElement | null {
+  return shadow?.querySelector<HTMLTextAreaElement | HTMLInputElement>(`[data-role='${role}']`) ?? null;
 }
 
 function getButton(action: string): HTMLButtonElement | null {
@@ -507,35 +641,132 @@ function buildShell(): string {
         box-sizing: border-box;
       }
 
-      .bubble {
-        position: relative;
-        overflow: hidden;
-        border: 1px solid rgba(17, 24, 39, 0.08);
-        border-radius: 8px;
-        background: rgba(255, 255, 255, 0.98);
+      .dock {
         color: #111827;
+      }
+
+      .collapsed,
+      .mini,
+      .expanded {
+        border: 1px solid rgba(17, 24, 39, 0.08);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.98);
         box-shadow: 0 18px 44px rgba(17, 24, 39, 0.11), 0 1px 1px rgba(17, 24, 39, 0.05);
         -webkit-backdrop-filter: saturate(1.08) blur(18px);
         backdrop-filter: saturate(1.08) blur(18px);
       }
 
-      .close {
-        min-width: 36px;
-        width: 36px;
-        padding: 7px 0;
-        border-color: transparent;
-        background: transparent;
-        color: #6b7280;
+      .dock[data-state="collapsed"] .mini,
+      .dock[data-state="collapsed"] .expanded,
+      .dock[data-state="mini"] .collapsed,
+      .dock[data-state="mini"] .expanded,
+      .dock[data-state="expanded"] .collapsed,
+      .dock[data-state="expanded"] .mini {
+        display: none;
+      }
+
+      .collapsed {
+        width: 62px;
+        height: 62px;
+        display: grid;
+        place-items: center;
+      }
+
+      .orb {
+        width: 46px;
+        height: 46px;
+        border: 1px solid rgba(17, 24, 39, 0.12);
+        border-radius: 50%;
+        background: #111827;
+        color: #ffffff;
+        cursor: pointer;
+        font: inherit;
         font-size: 18px;
-        line-height: 1;
+        font-weight: 760;
+      }
+
+      .mini {
+        display: grid;
+        gap: 8px;
+        padding: 9px;
+      }
+
+      .mini-row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .expanded {
+        overflow: hidden;
+      }
+
+      .topbar {
+        display: grid;
+        gap: 7px;
+        padding: 9px 10px 8px;
+        border-bottom: 1px solid rgba(17, 24, 39, 0.06);
+      }
+
+      .drag-handle {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 20px;
+        cursor: grab;
+        user-select: none;
+      }
+
+      .drag-handle:active {
+        cursor: grabbing;
+      }
+
+      .brand {
+        font-size: 12px;
+        font-weight: 760;
+        letter-spacing: 0;
+      }
+
+      .mode {
+        color: #6b7280;
+        font-size: 11px;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+
+      .chip {
+        max-width: 168px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        border: 1px solid rgba(17, 24, 39, 0.08);
+        border-radius: 999px;
+        padding: 3px 7px;
+        background: #fbfcfc;
+        color: #374151;
+        font-size: 11px;
+        line-height: 1.25;
+      }
+
+      .chip-muted {
+        color: #6b7280;
+      }
+
+      .chip-title {
+        max-width: 220px;
       }
 
       .messages {
         display: grid;
         gap: 8px;
-        max-height: 230px;
+        max-height: 260px;
         overflow: auto;
-        padding: 12px 12px 8px;
+        padding: 10px 10px 6px;
       }
 
       .messages[hidden] {
@@ -545,7 +776,7 @@ function buildShell(): string {
       .message {
         max-width: 96%;
         border: 1px solid rgba(17, 24, 39, 0.08);
-        border-radius: 8px;
+        border-radius: 9px;
         padding: 9px 10px;
         background: #ffffff;
         box-shadow: 0 1px 0 rgba(17, 24, 39, 0.03);
@@ -560,7 +791,6 @@ function buildShell(): string {
       .message-system {
         max-width: 100%;
         background: #fbfcfc;
-        border-color: rgba(17, 24, 39, 0.08);
       }
 
       .message-role {
@@ -568,7 +798,6 @@ function buildShell(): string {
         color: #6b7280;
         font-size: 11px;
         font-weight: 620;
-        line-height: 1.2;
       }
 
       .message-body {
@@ -604,30 +833,40 @@ function buildShell(): string {
       .composer {
         display: grid;
         gap: 8px;
-        padding: 12px;
-        border-top: 0;
+        padding: 10px;
       }
 
+      input,
       textarea {
         width: 100%;
-        min-height: 86px;
-        max-height: 180px;
-        resize: vertical;
         border: 1px solid rgba(17, 24, 39, 0.1);
-        border-radius: 8px;
-        padding: 10px 11px;
+        border-radius: 9px;
         background: #ffffff;
         color: #111827;
         font: inherit;
         font-size: 13px;
-        line-height: 1.6;
         outline: none;
       }
 
+      input {
+        min-height: 38px;
+        padding: 0 10px;
+      }
+
+      textarea {
+        min-height: 78px;
+        max-height: 170px;
+        resize: vertical;
+        padding: 10px 11px;
+        line-height: 1.6;
+      }
+
+      input::placeholder,
       textarea::placeholder {
         color: #8b949e;
       }
 
+      input:focus,
       textarea:focus,
       button:focus-visible {
         border-color: rgba(17, 24, 39, 0.32);
@@ -650,26 +889,26 @@ function buildShell(): string {
         gap: 6px;
       }
 
-      button[hidden] {
-        display: none;
-      }
-
       .primary-actions {
         margin-left: auto;
       }
 
+      button[hidden] {
+        display: none;
+      }
+
       button {
         appearance: none;
-        min-height: 36px;
+        min-height: 34px;
         border: 1px solid rgba(17, 24, 39, 0.1);
-        border-radius: 8px;
+        border-radius: 9px;
         background: #ffffff;
         color: #111827;
         cursor: pointer;
         font: inherit;
         font-size: 12px;
         font-weight: 620;
-        transition: background 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms ease;
+        transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
       }
 
       button:hover {
@@ -677,23 +916,24 @@ function buildShell(): string {
         background: #fbfcfc;
       }
 
-      button:active {
-        transform: translateY(0);
-      }
-
       button:disabled {
         cursor: default;
         opacity: 0.48;
-        transform: none;
       }
 
       .tool-button {
-        padding: 7px 9px;
+        padding: 6px 9px;
+      }
+
+      .icon-button {
+        min-width: 32px;
+        width: 32px;
+        padding: 0;
       }
 
       .send-button {
-        min-width: 64px;
-        padding: 7px 12px;
+        min-width: 60px;
+        padding: 6px 12px;
         border-color: #111827;
         background: #111827;
         color: #ffffff;
@@ -705,48 +945,47 @@ function buildShell(): string {
       }
 
       @media (prefers-color-scheme: dark) {
-        .bubble {
+        .dock {
+          color: #f8fafc;
+        }
+
+        .collapsed,
+        .mini,
+        .expanded {
           border-color: rgba(226, 232, 240, 0.14);
           background: rgba(15, 18, 22, 0.96);
-          color: #f8fafc;
           box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28), 0 1px 1px rgba(0, 0, 0, 0.18);
         }
 
-        .composer {
+        .topbar {
           border-color: rgba(226, 232, 240, 0.1);
         }
 
-        .message-body,
-        textarea,
-        button {
-          color: #f8fafc;
-        }
-
-        .message-role,
-        .close {
+        .mode,
+        .message-role {
           color: #aeb7c2;
         }
 
-        .close,
+        .chip,
         button,
+        input,
         textarea,
         .message {
           border-color: rgba(226, 232, 240, 0.12);
           background: #11161c;
+          color: #f8fafc;
+        }
+
+        .message-body {
+          color: #f8fafc;
         }
 
         .message-user {
           background: rgba(248, 250, 252, 0.06);
-          border-color: rgba(226, 232, 240, 0.16);
         }
 
         .message-system {
           background: rgba(248, 250, 252, 0.04);
-          border-color: rgba(226, 232, 240, 0.12);
-        }
-
-        .close {
-          background: transparent;
         }
 
         .send-button {
@@ -755,9 +994,10 @@ function buildShell(): string {
           color: #111827;
         }
 
-        .send-button:hover {
-          border-color: #ffffff;
-          background: #ffffff;
+        .orb {
+          border-color: rgba(248, 250, 252, 0.18);
+          background: #f8fafc;
+          color: #111827;
         }
       }
 
@@ -767,21 +1007,45 @@ function buildShell(): string {
         }
       }
     </style>
-    <section class="bubble" role="dialog" aria-label="Think Anytime 原位对话框">
-      <div class="messages" data-role="messages" aria-live="polite"></div>
-      <div class="composer">
-        <textarea data-role="question" placeholder="${DEFAULT_QUESTION}"></textarea>
-        <div class="actions">
-          <div class="secondary-actions">
-            <button class="tool-button" type="button" data-action="save">保存</button>
-            <button class="tool-button" type="button" data-action="retrieve">查库</button>
-            <button class="tool-button" type="button" data-action="promote">入库</button>
-            <button class="tool-button" type="button" data-action="expand">展开</button>
+    <section class="dock" data-role="dock" data-state="collapsed" aria-label="Think Anytime Dock">
+      <div class="collapsed">
+        <button class="orb" type="button" data-action="open" aria-label="打开 Think Anytime">T</button>
+      </div>
+      <div class="mini">
+        <div class="drag-handle" data-role="drag-handle">
+          <span class="brand">Think</span>
+          <span class="mode">Dock</span>
+        </div>
+        <div class="mini-row">
+          <input data-role="mini-question" placeholder="${DEFAULT_QUESTION}" />
+          <button class="icon-button" type="button" data-action="expand-dock" aria-label="展开">↗</button>
+          <button class="send-button" type="button" data-action="mini-send">发送</button>
+        </div>
+      </div>
+      <div class="expanded" role="dialog" aria-label="Think Anytime 对话 Dock">
+        <div class="topbar">
+          <div class="drag-handle" data-role="drag-handle">
+            <span class="brand">Think Anytime</span>
+            <span class="mode" data-role="mode-label">极速默认</span>
           </div>
-          <div class="primary-actions">
-            <button class="tool-button" type="button" data-action="retry" hidden>重试</button>
-            <button class="tool-button close" type="button" data-action="close" aria-label="关闭 Think Anytime 原位对话框">×</button>
-            <button class="send-button" type="button" data-action="send">发送</button>
+          <div class="chips" data-role="context-chips"></div>
+        </div>
+        <div class="messages" data-role="messages" aria-live="polite"></div>
+        <div class="composer">
+          <textarea data-role="question" placeholder="${DEFAULT_QUESTION}"></textarea>
+          <div class="actions">
+            <div class="secondary-actions">
+              <button class="tool-button" type="button" data-action="save">保存</button>
+              <button class="tool-button" type="button" data-action="retrieve">查库</button>
+              <button class="tool-button" type="button" data-action="promote">入库</button>
+              <button class="tool-button" type="button" data-action="expand">展开</button>
+            </div>
+            <div class="primary-actions">
+              <button class="tool-button" type="button" data-action="new">新对话</button>
+              <button class="tool-button" type="button" data-action="retry" hidden>重试</button>
+              <button class="tool-button icon-button" type="button" data-action="collapse" aria-label="折叠 Think Anytime Dock">×</button>
+              <button class="send-button" type="button" data-action="send">发送</button>
+            </div>
           </div>
         </div>
       </div>
@@ -804,6 +1068,54 @@ function roleLabel(role: InlineRole): string {
   if (role === "assistant") return "Think";
   if (role === "user") return "你";
   return "系统";
+}
+
+function loadDockState(): PersistedDockState {
+  try {
+    return JSON.parse(window.localStorage.getItem(DOCK_STORAGE_KEY) || "{}") as PersistedDockState;
+  } catch {
+    return {};
+  }
+}
+
+function saveDockState(): void {
+  try {
+    window.localStorage.setItem(
+      DOCK_STORAGE_KEY,
+      JSON.stringify({
+        state: dockState,
+        position: dockPosition,
+      } satisfies PersistedDockState),
+    );
+  } catch {
+    // localStorage 不可用时只保留当前页面内状态。
+  }
+}
+
+function createSessionId(): string {
+  return `dock-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function logCaptureDetails(context: ReadingContext): void {
+  console.info("[Think Anytime] Dock context captured", {
+    title: context.source.title,
+    site: context.source.site,
+    selectionLength: context.selectionText?.length ?? 0,
+    visualAssets:
+      context.visualAssets?.map((asset) => ({
+        id: asset.id,
+        type: asset.type,
+        label: asset.label,
+        sourceUrl: asset.sourceUrl,
+        rect: asset.rect,
+      })) ?? [],
+  });
+}
+
+function buildSaveButtonTitle(): string {
+  if (!lastSaveRecommendation) return "保存到 Think Anytime";
+  const level = lastSaveRecommendation.level === "source" ? "card" : lastSaveRecommendation.level;
+  return `按 AI 建议保存为 ${level}/${lastSaveRecommendation.cardType}`;
 }
 
 function escapeHtml(value: string): string {
