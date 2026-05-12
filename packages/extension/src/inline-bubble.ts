@@ -11,6 +11,7 @@ import type {
   TwyrCardType,
   TwyrContextScope,
   TwyrConversationMessage,
+  TwyrResponseMode,
 } from "@twyr/shared";
 import { DEFAULT_CODEX_MODEL } from "@twyr/shared";
 import {
@@ -25,6 +26,14 @@ import {
   type StoredDockConversation,
 } from "./conversation-history.js";
 import type { PendingAction, RuntimeMessage } from "./messages.js";
+import {
+  createQueueId,
+  dequeueDockRequest,
+  enqueueDockRequest,
+  getDockRequestQueueCount,
+  type DockRequestQueueItem,
+  type DockRequestQueues,
+} from "./request-queue.js";
 
 interface InlineBubbleOptions {
   captureContext: (scope?: TwyrContextScope) => ReadingContext;
@@ -38,9 +47,10 @@ interface InlineMessage {
   content: string;
   response?: AskResponse;
   feedbackRating?: FeedbackRating;
-  status?: "thinking" | "stopped" | "error";
+  status?: "thinking" | "queued" | "stopped" | "error";
   requestId?: number;
   sessionId?: string;
+  queueId?: string;
 }
 
 interface DockPosition {
@@ -53,6 +63,22 @@ interface PersistedDockState {
   position?: DockPosition;
   model?: string;
   reasoningPreset?: DockReasoningPreset;
+}
+
+interface PreparedQuestionRequest {
+  sessionId: string;
+  question: string;
+  context: ReadingContext;
+  model: string;
+  reasoningPreset: DockReasoningPreset;
+  responseMode: TwyrResponseMode;
+  contextScope: TwyrContextScope;
+  modelReasoningEffort: TwyrModelReasoningEffort;
+}
+
+interface QueuedDockQuestion extends DockRequestQueueItem, PreparedQuestionRequest {
+  id: string;
+  queuedAt: number;
 }
 
 type InlineApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -87,6 +113,7 @@ let lastSavedAt = 0;
 let isBusy = false;
 let activeRequestId = 0;
 const pendingRequests = new Map<string, number>();
+const queuedRequests: DockRequestQueues<QueuedDockQuestion> = new Map();
 let sessionId = createSessionId();
 let resizeBound = false;
 let dragState:
@@ -259,19 +286,12 @@ function bindEvents(options: InlineBubbleOptions): void {
     renderBubble(options);
   });
   getButton("new")?.addEventListener("click", () => resetConversation(options));
-  getButton("send")?.addEventListener("click", () => {
-    if (isCurrentConversationBusy()) {
-      stopActiveRequest(options);
-      return;
-    }
-    void sendQuestion(options);
-  });
-  getButton("mini-send")?.addEventListener("click", () => {
-    if (isCurrentConversationBusy()) {
-      stopActiveRequest(options);
-      return;
-    }
-    void sendQuestion(options, getTextarea("mini-question")?.value.trim());
+  getButton("send")?.addEventListener("click", () => void sendQuestion(options));
+  getButton("mini-send")?.addEventListener("click", () =>
+    void sendQuestion(options, getTextarea("mini-question")?.value.trim()),
+  );
+  getButtons("stop").forEach((button) => {
+    button.addEventListener("click", () => stopActiveRequest(options));
   });
   getButton("retry")?.addEventListener("click", () => void retryLastQuestion(options));
   getButton("save")?.addEventListener("click", () => void saveCurrentThread(options));
@@ -374,12 +394,15 @@ function isImeComposing(event: KeyboardEvent): boolean {
 
 function renderBubble(options: InlineBubbleOptions): void {
   if (!shadow) return;
-  const currentBusy = isBusy || isCurrentConversationBusy();
+  const currentAskBusy = isCurrentConversationBusy();
+  const currentBusy = isBusy || currentAskBusy;
+  const queuedCount = getDockRequestQueueCount(queuedRequests, sessionId);
   const root = shadow.querySelector<HTMLElement>("[data-role='dock']");
   const messageList = shadow.querySelector<HTMLElement>("[data-role='messages']");
   const chips = shadow.querySelector<HTMLElement>("[data-role='context-chips']");
   const sendButton = getButton("send");
   const miniSendButton = getButton("mini-send");
+  const stopButtons = getButtons("stop");
   const saveButton = getButton("save");
   const retrieveButton = getButton("retrieve");
   const promoteButton = getButton("promote");
@@ -392,7 +415,10 @@ function renderBubble(options: InlineBubbleOptions): void {
 
   if (root) root.dataset.state = dockState;
   if (chips) chips.innerHTML = renderContextChips();
-  if (modeLabel) modeLabel.textContent = currentBusy ? `${formatReasoningPreset()} 思考中` : formatReasoningPreset();
+  if (modeLabel) {
+    modeLabel.textContent = queuedCount ? `+${queuedCount}` : "";
+    modeLabel.hidden = queuedCount === 0;
+  }
   if (modelSelect) modelSelect.value = dockModel;
   if (reasoningSelect) reasoningSelect.value = dockReasoningPreset;
   if (messageList) {
@@ -409,8 +435,20 @@ function renderBubble(options: InlineBubbleOptions): void {
     historyPanel.hidden = !historyOpen;
   }
   bindConversationButtons(options);
-  if (sendButton) sendButton.textContent = currentBusy ? "停止" : "发送";
-  if (miniSendButton) miniSendButton.textContent = currentBusy ? "停止" : "发送";
+  if (sendButton) {
+    sendButton.textContent = currentAskBusy ? "排队" : "发送";
+    sendButton.toggleAttribute("disabled", isBusy && !currentAskBusy);
+    sendButton.title = currentAskBusy ? "把输入内容排到当前回答后面" : "发送问题";
+  }
+  if (miniSendButton) {
+    miniSendButton.textContent = currentAskBusy ? "排队" : "发送";
+    miniSendButton.toggleAttribute("disabled", isBusy && !currentAskBusy);
+    miniSendButton.title = currentAskBusy ? "把输入内容排到当前回答后面" : "发送问题";
+  }
+  stopButtons.forEach((button) => {
+    button.hidden = !currentAskBusy;
+    button.title = "停止当前回答";
+  });
   if (saveButton) saveButton.textContent = Date.now() - lastSavedAt < 1600 ? "已保存" : "保存";
   if (saveButton) saveButton.toggleAttribute("disabled", currentBusy || !currentContext);
   if (saveButton) saveButton.title = buildSaveButtonTitle();
@@ -426,51 +464,118 @@ function renderBubble(options: InlineBubbleOptions): void {
 }
 
 async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: string): Promise<void> {
+  const draft = readQuestionDraft(overrideQuestion);
+  if (!draft.question) return;
+  if (isBusy && !isCurrentConversationBusy()) return;
+  if (isCurrentConversationBusy() && draft.usedDefault) {
+    options.showToast("Think Anytime：先输入要排队的问题");
+    focusComposer();
+    return;
+  }
+  const request = prepareQuestionRequest(options, draft.question);
+  if (isCurrentConversationBusy()) {
+    enqueueQuestion(options, request);
+    return;
+  }
+  await dispatchQuestion(options, request, { appendUserMessage: true });
+}
+
+function readQuestionDraft(overrideQuestion?: string): { question: string; usedDefault: boolean } {
   const fullTextarea = getTextarea("question");
   const miniTextarea = getTextarea("mini-question");
-  const question = overrideQuestion?.trim() || fullTextarea?.value.trim() || miniTextarea?.value.trim() || DEFAULT_QUESTION;
-  if (isBusy || isCurrentConversationBusy() || !question) return;
-  const responseMode = dockReasoningPreset === "xhigh" ? "deep" : "fast";
+  const directQuestion = overrideQuestion?.trim() || fullTextarea?.value.trim() || miniTextarea?.value.trim();
+  return {
+    question: directQuestion || DEFAULT_QUESTION,
+    usedDefault: !directQuestion,
+  };
+}
+
+function prepareQuestionRequest(options: InlineBubbleOptions, question: string): PreparedQuestionRequest {
+  const responseMode: TwyrResponseMode = dockReasoningPreset === "xhigh" ? "deep" : "fast";
   const contextScope: TwyrContextScope = responseMode === "deep" ? "page" : "selection";
   const modelReasoningEffort: TwyrModelReasoningEffort = dockReasoningPreset === "xhigh" ? "xhigh" : "low";
   currentContext = prepareContextForSend(options, contextScope);
-
-  const conversation = buildConversationHistory();
-  const requestSessionId = sessionId;
-  const requestContext = currentContext;
-  const requestModel = dockModel;
-  const requestReasoningPreset = dockReasoningPreset;
-  const requestId = activeRequestId + 1;
-  activeRequestId = requestId;
-  pendingRequests.set(requestSessionId, requestId);
-  lastQuestion = question;
-  messages.push({ role: "user", content: question });
-  const thinkingMessage: InlineMessage = {
-    role: "system",
-    content: buildThinkingMessage(requestModel, requestReasoningPreset, responseMode),
-    status: "thinking",
-    requestId,
-    sessionId: requestSessionId,
+  return {
+    sessionId,
+    question,
+    context: currentContext,
+    model: dockModel,
+    reasoningPreset: dockReasoningPreset,
+    responseMode,
+    contextScope,
+    modelReasoningEffort,
   };
-  messages.push(thinkingMessage);
-  if (fullTextarea) fullTextarea.value = "";
-  if (miniTextarea) miniTextarea.value = "";
+}
+
+function enqueueQuestion(options: InlineBubbleOptions, request: PreparedQuestionRequest): void {
+  const queueId = createQueueId();
+  enqueueDockRequest(queuedRequests, {
+    ...request,
+    id: queueId,
+    queuedAt: Date.now(),
+  });
+  lastQuestion = request.question;
+  messages.push({ role: "user", content: request.question, queueId });
+  messages.push({
+    role: "system",
+    content: "排队中",
+    status: "queued",
+    sessionId: request.sessionId,
+    queueId,
+  });
+  clearQuestionInputs();
   setDockState("expanded", options, false);
   renderBubble(options);
   void saveCurrentConversation();
+  window.setTimeout(() => getTextarea("question")?.focus(), 0);
+}
+
+async function dispatchQuestion(
+  options: InlineBubbleOptions,
+  request: PreparedQuestionRequest,
+  settings: { appendUserMessage: boolean; queueId?: string } = { appendUserMessage: true },
+): Promise<void> {
+  const conversation = buildConversationHistoryForSession(request.sessionId, settings.queueId);
+  const requestSessionId = request.sessionId;
+  const requestId = activeRequestId + 1;
+  activeRequestId = requestId;
+  pendingRequests.set(requestSessionId, requestId);
+  if (sessionId === requestSessionId) {
+    lastQuestion = request.question;
+  }
+  const thinkingMessage: InlineMessage = {
+    role: "system",
+    content: "",
+    status: "thinking",
+    requestId,
+    sessionId: requestSessionId,
+    queueId: settings.queueId,
+  };
+  if (sessionId === requestSessionId) {
+    if (settings.appendUserMessage) messages.push({ role: "user", content: request.question });
+    if (settings.queueId) {
+      replaceQueuedMessage(requestSessionId, settings.queueId, thinkingMessage);
+    } else {
+      messages.push(thinkingMessage);
+    }
+    clearQuestionInputs();
+    setDockState("expanded", options, false);
+    renderBubble(options);
+    void saveCurrentConversation();
+  }
 
   try {
     const response = await sendInlineRequest<AskResponse>({
       type: "TWYR_INLINE_ASK",
       body: {
-        context: requestContext,
-        question,
+        context: request.context,
+        question: request.question,
         mode: "freeform",
-        responseMode,
-        contextScope,
+        responseMode: request.responseMode,
+        contextScope: request.contextScope,
         sessionId: requestSessionId,
-        model: requestModel,
-        modelReasoningEffort,
+        model: request.model,
+        modelReasoningEffort: request.modelReasoningEffort,
         conversation,
       },
     });
@@ -487,11 +592,11 @@ async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: str
     } else {
       upsertConversationResponse({
         requestSessionId,
-        context: requestContext,
-        question,
+        context: request.context,
+        question: request.question,
         response,
-        model: requestModel,
-        reasoningPreset: requestReasoningPreset,
+        model: request.model,
+        reasoningPreset: request.reasoningPreset,
       });
       void persistConversationHistory();
     }
@@ -507,7 +612,14 @@ async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: str
       });
       void saveCurrentConversation();
     } else {
-      upsertConversationSystemMessage(requestSessionId, requestContext, question, content, requestModel, requestReasoningPreset);
+      upsertConversationSystemMessage(
+        requestSessionId,
+        request.context,
+        request.question,
+        content,
+        request.model,
+        request.reasoningPreset,
+      );
       void persistConversationHistory();
     }
   } finally {
@@ -515,6 +627,7 @@ async function sendQuestion(options: InlineBubbleOptions, overrideQuestion?: str
       renderBubble(options);
       getTextarea("question")?.focus();
     }
+    void processNextQueuedQuestion(options, requestSessionId);
   }
 }
 
@@ -534,11 +647,26 @@ function stopActiveRequest(options: InlineBubbleOptions): void {
   renderBubble(options);
   void saveCurrentConversation();
   restorePageSelection();
+  void processNextQueuedQuestion(options, sessionId);
 }
 
 async function retryLastQuestion(options: InlineBubbleOptions): Promise<void> {
   if (!lastQuestion || isBusy || isCurrentConversationBusy()) return;
   await sendQuestion(options, lastQuestion);
+}
+
+async function processNextQueuedQuestion(options: InlineBubbleOptions, targetSessionId: string): Promise<void> {
+  if (pendingRequests.has(targetSessionId)) return;
+  const next = dequeueDockRequest(queuedRequests, targetSessionId);
+  if (!next) return;
+  await dispatchQuestion(options, next, { appendUserMessage: false, queueId: next.id });
+}
+
+function clearQuestionInputs(): void {
+  const fullTextarea = getTextarea("question");
+  const miniTextarea = getTextarea("mini-question");
+  if (fullTextarea) fullTextarea.value = "";
+  if (miniTextarea) miniTextarea.value = "";
 }
 
 async function saveCurrentThread(options: InlineBubbleOptions): Promise<void> {
@@ -844,7 +972,17 @@ async function sendInlineRequest<T>(message: RuntimeMessage): Promise<T> {
 }
 
 function buildConversationHistory(): TwyrConversationMessage[] {
-  return messages
+  return buildConversationHistoryForSession(sessionId);
+}
+
+function buildConversationHistoryForSession(
+  targetSessionId: string,
+  excludeQueueId?: string,
+): TwyrConversationMessage[] {
+  const sourceMessages =
+    targetSessionId === sessionId ? messages : historySessions.find((conversation) => conversation.sessionId === targetSessionId)?.messages ?? [];
+  return sourceMessages
+    .filter((message) => !excludeQueueId || !("queueId" in message) || message.queueId !== excludeQueueId)
     .filter((message): message is InlineMessage & { role: "user" | "assistant" } => {
       return message.role === "user" || message.role === "assistant";
     })
@@ -855,14 +993,17 @@ function buildConversationHistory(): TwyrConversationMessage[] {
     .slice(-8);
 }
 
-function buildThinkingMessage(model: string, preset: DockReasoningPreset, responseMode: string): string {
-  const mode = preset === "xhigh" ? "深度思考" : "快速思考";
-  const scope = responseMode === "deep" ? "整页上下文" : "选区上下文";
-  return `${model} 正在${mode} · ${scope}`;
-}
-
 function removeThinkingMessage(targetSessionId: string, requestId: number): void {
   messages = messages.filter((message) => message.sessionId !== targetSessionId || message.requestId !== requestId);
+}
+
+function replaceQueuedMessage(targetSessionId: string, queueId: string, nextMessage: InlineMessage): void {
+  const index = messages.findIndex((message) => message.sessionId === targetSessionId && message.queueId === queueId);
+  if (index >= 0) {
+    messages[index] = nextMessage;
+    return;
+  }
+  messages.push(nextMessage);
 }
 
 function replaceThinkingMessage(targetSessionId: string, requestId: number, nextMessage: InlineMessage): void {
@@ -877,10 +1018,14 @@ function replaceThinkingMessage(targetSessionId: string, requestId: number, next
 function renderMessage(message: InlineMessage, index: number): string {
   const longClass = message.role === "assistant" && message.content.length > 1200 ? " message-long" : "";
   const statusClass = message.status ? ` message-${message.status}` : "";
+  if (message.status === "thinking") {
+    return `<article class="message message-system message-thinking" aria-label="正在工作">
+      <div class="thinking-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+    </article>`;
+  }
   return `<article class="message message-${message.role}${longClass}${statusClass}">
     <div class="message-role">${roleLabel(message.role)}</div>
     <div class="message-body">${escapeHtml(message.content)}</div>
-    ${message.status === "thinking" ? '<div class="thinking-dots" aria-hidden="true"><span></span><span></span><span></span></div>' : ""}
     ${renderFeedbackControls(message, index)}
   </article>`;
 }
@@ -911,7 +1056,7 @@ function renderHistoryPanel(): string {
   const rows = activeConversations
     .map((conversation) => {
       const activeClass = conversation.sessionId === sessionId ? " history-item-active" : "";
-      const pendingLabel = pendingRequests.has(conversation.sessionId) ? " · 思考中" : "";
+      const pendingLabel = renderConversationWorkLabel(conversation.sessionId);
       const lastMessage = conversation.messages.at(-1)?.content || conversation.title;
       return `<div class="history-item${activeClass}">
         <button class="history-open" type="button" data-conversation-open="${escapeHtml(conversation.id)}">
@@ -933,20 +1078,25 @@ function renderHistoryPanel(): string {
 function renderQuickConversationRail(): string {
   const activeConversations = getActiveConversations(historySessions, QUICK_RAIL_SESSIONS);
   const rows = activeConversations
-    .map((conversation) => {
+    .map((conversation, index) => {
       const activeClass = conversation.sessionId === sessionId ? " rail-item-active" : "";
-      const pendingLabel = pendingRequests.has(conversation.sessionId) ? " · 思考中" : "";
-      return `<button class="rail-item${activeClass}" type="button" data-conversation-open="${escapeHtml(conversation.id)}" title="${escapeHtml(conversation.title)}">
-        <span class="rail-title">${escapeHtml(conversation.title)}</span>
-        <span class="rail-meta">${escapeHtml(formatHistoryTime(conversation.updatedAt))}${pendingLabel}</span>
+      const pendingLabel = renderConversationWorkLabel(conversation.sessionId);
+      return `<button class="rail-item${activeClass}" type="button" data-conversation-open="${escapeHtml(conversation.id)}" title="${escapeHtml(conversation.title)} · ${escapeHtml(formatHistoryTime(conversation.updatedAt))}${pendingLabel}" aria-label="切换到对话：${escapeHtml(conversation.title)}">
+        <span class="rail-mark">${index + 1}</span>
+        <span class="rail-status" aria-hidden="true">${pendingRequests.has(conversation.sessionId) ? "…" : ""}</span>
       </button>`;
     })
     .join("");
   return `<div class="rail-heading">
-      <span>对话</span>
-      <button class="rail-new" type="button" data-conversation-command="new" aria-label="新对话">＋</button>
+      <button class="rail-new" type="button" data-conversation-command="new" title="新对话" aria-label="新对话">＋</button>
     </div>
     <div class="rail-list">${rows || '<div class="rail-empty">暂无历史</div>'}</div>`;
+}
+
+function renderConversationWorkLabel(targetSessionId: string): string {
+  const queuedCount = getDockRequestQueueCount(queuedRequests, targetSessionId);
+  const parts = [pendingRequests.has(targetSessionId) ? "…" : "", queuedCount ? `${queuedCount} 排队` : ""].filter(Boolean);
+  return parts.length ? ` · ${parts.join(" · ")}` : "";
 }
 
 function getTextarea(role: "question" | "mini-question"): HTMLTextAreaElement | HTMLInputElement | null {
@@ -1074,17 +1224,24 @@ function buildCurrentConversationSnapshot(): StoredDockConversation {
     updatedAt: now,
     threadPath: lastThreadPath || existing?.threadPath,
     context: sanitizeContextForHistory(context),
-    messages: messages.slice(-MAX_STORED_MESSAGES).map((message) => ({
-      role: message.role,
-      content: trimInlineText(message.content, 4000),
-      feedbackRating: message.feedbackRating,
-    })),
+    messages: messages
+      .filter((message) => !isTransientMessage(message))
+      .slice(-MAX_STORED_MESSAGES)
+      .map((message) => ({
+        role: message.role,
+        content: trimInlineText(message.content, 4000),
+        feedbackRating: message.feedbackRating,
+      })),
     lastQuestion: lastQuestion || existing?.lastQuestion,
     lastAnswer: trimInlineText(lastAnswer || existing?.lastAnswer || "", 4000),
     lastSaveRecommendation,
     model: dockModel,
     reasoningPreset: dockReasoningPreset,
   };
+}
+
+function isTransientMessage(message: InlineMessage): boolean {
+  return message.status === "thinking" || message.status === "queued";
 }
 
 function upsertConversationSnapshot(record: StoredDockConversation): void {
@@ -1184,6 +1341,22 @@ function restoreConversation(id: string, options: InlineBubbleOptions): void {
     content: message.content,
     feedbackRating: message.feedbackRating,
   }));
+  const activeRequest = pendingRequests.get(sessionId);
+  if (typeof activeRequest === "number") {
+    messages.push({ role: "system", content: "", status: "thinking", requestId: activeRequest, sessionId });
+  }
+  for (const queued of queuedRequests.get(sessionId) ?? []) {
+    if (!messages.some((message) => message.role === "user" && message.content === queued.question)) {
+      messages.push({ role: "user", content: queued.question, queueId: queued.id });
+    }
+    messages.push({
+      role: "system",
+      content: "排队中",
+      status: "queued",
+      sessionId,
+      queueId: queued.id,
+    });
+  }
   historyOpen = false;
   setDockState("expanded", options);
   restorePageSelection();
@@ -1240,6 +1413,21 @@ function buildShell(): string {
       :host {
         color-scheme: light dark;
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --twyr-bg: #fbfbfa;
+        --twyr-surface: rgba(255, 255, 255, 0.985);
+        --twyr-surface-strong: #ffffff;
+        --twyr-surface-subtle: #f7f7f5;
+        --twyr-text: #151922;
+        --twyr-muted: #737986;
+        --twyr-border: rgba(21, 25, 34, 0.11);
+        --twyr-border-strong: rgba(21, 25, 34, 0.24);
+        --twyr-primary: #1f2937;
+        --twyr-primary-hover: #111827;
+        --twyr-primary-soft: #f3f4f6;
+        --twyr-danger: #b42318;
+        --twyr-danger-soft: #fff1f0;
+        --twyr-ring: rgba(31, 41, 55, 0.13);
+        --twyr-shadow: 0 18px 52px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.05);
       }
 
       * {
@@ -1247,16 +1435,16 @@ function buildShell(): string {
       }
 
       .dock {
-        color: #111827;
+        color: var(--twyr-text);
       }
 
       .collapsed,
       .mini,
       .expanded {
-        border: 1px solid rgba(17, 24, 39, 0.08);
+        border: 1px solid var(--twyr-border);
         border-radius: 12px;
-        background: rgba(255, 255, 255, 0.98);
-        box-shadow: 0 18px 44px rgba(17, 24, 39, 0.11), 0 1px 1px rgba(17, 24, 39, 0.05);
+        background: var(--twyr-surface);
+        box-shadow: var(--twyr-shadow);
         -webkit-backdrop-filter: saturate(1.08) blur(18px);
         backdrop-filter: saturate(1.08) blur(18px);
       }
@@ -1280,14 +1468,15 @@ function buildShell(): string {
       .orb {
         width: 46px;
         height: 46px;
-        border: 1px solid rgba(17, 24, 39, 0.12);
+        border: 1px solid rgba(21, 25, 34, 0.14);
         border-radius: 50%;
-        background: #111827;
+        background: var(--twyr-primary);
         color: #ffffff;
         cursor: pointer;
         font: inherit;
         font-size: 18px;
         font-weight: 760;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
       }
 
       .mini {
@@ -1298,7 +1487,7 @@ function buildShell(): string {
 
       .mini-row {
         display: grid;
-        grid-template-columns: 1fr auto auto auto;
+        grid-template-columns: 1fr auto auto auto auto;
         gap: 6px;
         align-items: center;
       }
@@ -1309,15 +1498,15 @@ function buildShell(): string {
 
       .expanded-layout {
         display: grid;
-        grid-template-columns: 118px minmax(0, 1fr);
+        grid-template-columns: 58px minmax(0, 1fr);
         min-height: 0;
       }
 
       .conversation-rail {
         min-width: 0;
-        padding: 8px 7px;
-        border-right: 1px solid rgba(17, 24, 39, 0.06);
-        background: rgba(251, 252, 252, 0.72);
+        padding: 10px 8px;
+        border-right: 1px solid rgba(21, 25, 34, 0.08);
+        background: rgba(250, 250, 249, 0.72);
       }
 
       .conversation-main {
@@ -1327,70 +1516,93 @@ function buildShell(): string {
       .rail-heading {
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 6px;
-        margin-bottom: 7px;
-        color: #6b7280;
+        justify-content: center;
+        margin-bottom: 8px;
+        color: var(--twyr-muted);
         font-size: 11px;
         font-weight: 680;
       }
 
       .rail-new {
-        width: 26px;
-        min-width: 26px;
-        min-height: 26px;
+        width: 38px;
+        min-width: 38px;
+        min-height: 38px;
         padding: 0;
-        border-radius: 7px;
+        border-radius: 11px;
+        border-color: rgba(21, 25, 34, 0.1);
+        color: var(--twyr-primary);
+        font-size: 20px;
+        font-weight: 520;
       }
 
       .rail-list {
         display: grid;
-        gap: 5px;
-        max-height: 406px;
+        justify-items: center;
+        gap: 7px;
+        max-height: 306px;
         overflow: auto;
       }
 
       .rail-item {
+        position: relative;
         display: grid;
-        gap: 2px;
-        width: 100%;
-        min-height: 44px;
-        padding: 7px;
-        text-align: left;
+        place-items: center;
+        width: 38px;
+        min-width: 38px;
+        height: 38px;
+        min-height: 38px;
+        padding: 0;
+        text-align: center;
+        border-color: transparent;
+        background: transparent;
+        border-radius: 12px;
       }
 
       .rail-item-active {
-        border-color: rgba(17, 24, 39, 0.3);
-        background: #ffffff;
+        border-color: var(--twyr-border-strong);
+        background: var(--twyr-surface-strong);
+        box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
       }
 
-      .rail-title,
-      .rail-meta {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+      .rail-mark {
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 999px;
+        color: #4b5563;
+        font-size: 12px;
+        font-weight: 650;
+        line-height: 1;
       }
 
-      .rail-title {
-        font-size: 11px;
-        font-weight: 680;
+      .rail-item-active .rail-mark {
+        background: #111827;
+        color: #ffffff;
       }
 
-      .rail-meta,
+      .rail-status {
+        position: absolute;
+        right: 5px;
+        top: 3px;
+        color: var(--twyr-muted);
+        font-size: 12px;
+        line-height: 1;
+      }
+
       .rail-empty {
-        color: #6b7280;
+        padding: 6px 0;
+        color: var(--twyr-muted);
         font-size: 10px;
-      }
-
-      .rail-empty {
-        padding: 6px 2px;
+        writing-mode: vertical-rl;
       }
 
       .topbar {
         display: grid;
         gap: 6px;
-        padding: 8px 9px 7px;
-        border-bottom: 1px solid rgba(17, 24, 39, 0.06);
+        padding: 10px 12px 9px;
+        border-bottom: 1px solid rgba(21, 25, 34, 0.08);
+        background: rgba(255, 255, 255, 0.94);
       }
 
       .topbar-row {
@@ -1419,14 +1631,24 @@ function buildShell(): string {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-size: 12px;
-        font-weight: 760;
+        font-size: 14px;
+        font-weight: 720;
         letter-spacing: 0;
       }
 
       .mode {
-        color: #6b7280;
+        flex: none;
+        border: 1px solid rgba(21, 25, 34, 0.09);
+        border-radius: 999px;
+        padding: 3px 8px;
+        background: var(--twyr-primary-soft);
+        color: #4b5563;
         font-size: 11px;
+        font-weight: 610;
+      }
+
+      .mode:empty {
+        display: none;
       }
 
       .chips {
@@ -1440,11 +1662,11 @@ function buildShell(): string {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        border: 1px solid rgba(17, 24, 39, 0.08);
+        border: 1px solid rgba(21, 25, 34, 0.09);
         border-radius: 999px;
         padding: 3px 7px;
-        background: #fbfcfc;
-        color: #374151;
+        background: rgba(255, 255, 255, 0.7);
+        color: #6b7280;
         font-size: 11px;
         line-height: 1.25;
       }
@@ -1460,9 +1682,9 @@ function buildShell(): string {
       .messages {
         display: grid;
         gap: 8px;
-        max-height: 260px;
+        max-height: 236px;
         overflow: auto;
-        padding: 10px 10px 6px;
+        padding: 12px 12px 8px;
       }
 
       .messages[hidden] {
@@ -1473,25 +1695,31 @@ function buildShell(): string {
         max-width: 96%;
         border: 1px solid rgba(17, 24, 39, 0.08);
         border-radius: 9px;
-        padding: 9px 10px;
-        background: #ffffff;
+        padding: 10px 11px;
+        background: var(--twyr-surface-strong);
         box-shadow: 0 1px 0 rgba(17, 24, 39, 0.03);
       }
 
       .message-user {
         justify-self: end;
-        background: #fafafa;
-        border-color: rgba(17, 24, 39, 0.12);
+        border-color: rgba(21, 25, 34, 0.12);
+        background: #f7f7f5;
       }
 
       .message-system {
         max-width: 100%;
-        background: #fbfcfc;
+        background: var(--twyr-surface-subtle);
       }
 
       .message-thinking {
-        border-color: rgba(17, 24, 39, 0.14);
-        background: #f8fafc;
+        width: fit-content;
+        padding: 9px 11px;
+        border-color: rgba(21, 25, 34, 0.12);
+        background: #f7f7f5;
+      }
+
+      .message-queued {
+        color: #5f6b7a;
       }
 
       .message-stopped {
@@ -1500,7 +1728,7 @@ function buildShell(): string {
 
       .message-error {
         border-color: rgba(185, 28, 28, 0.28);
-        background: #fff7f7;
+        background: var(--twyr-danger-soft);
       }
 
       .message-role {
@@ -1527,7 +1755,7 @@ function buildShell(): string {
       .thinking-dots {
         display: inline-flex;
         gap: 4px;
-        margin-top: 8px;
+        margin-top: 0;
       }
 
       .thinking-dots span {
@@ -1577,18 +1805,20 @@ function buildShell(): string {
 
       .composer {
         display: grid;
-        gap: 8px;
-        padding: 10px;
+        gap: 9px;
+        padding: 11px 12px 12px;
+        border-top: 1px solid rgba(21, 25, 34, 0.07);
+        background: rgba(255, 255, 255, 0.92);
       }
 
       input,
       select,
       textarea {
         width: 100%;
-        border: 1px solid rgba(17, 24, 39, 0.1);
+        border: 1px solid var(--twyr-border);
         border-radius: 9px;
-        background: #ffffff;
-        color: #111827;
+        background: var(--twyr-surface-strong);
+        color: var(--twyr-text);
         font: inherit;
         font-size: 13px;
         outline: none;
@@ -1607,10 +1837,10 @@ function buildShell(): string {
       }
 
       textarea {
-        min-height: 78px;
-        max-height: 170px;
+        min-height: 74px;
+        max-height: 150px;
         resize: vertical;
-        padding: 10px 11px;
+        padding: 11px 12px;
         line-height: 1.6;
       }
 
@@ -1620,10 +1850,11 @@ function buildShell(): string {
       }
 
       input:focus,
+      select:focus,
       textarea:focus,
       button:focus-visible {
-        border-color: rgba(17, 24, 39, 0.32);
-        box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.08);
+        border-color: var(--twyr-primary);
+        box-shadow: 0 0 0 3px var(--twyr-ring);
         outline: none;
       }
 
@@ -1644,7 +1875,7 @@ function buildShell(): string {
       }
 
       .topbar-tools select {
-        min-height: 30px;
+        min-height: 34px;
         border-radius: 8px;
         padding: 0 22px 0 8px;
         color: #374151;
@@ -1660,18 +1891,18 @@ function buildShell(): string {
       }
 
       .topbar-tools .icon-button {
-        min-height: 30px;
-        min-width: 30px;
-        width: 30px;
+        min-height: 34px;
+        min-width: 34px;
+        width: 34px;
         border-radius: 8px;
         color: #374151;
         font-size: 15px;
       }
 
       .history-panel {
-        border-top: 1px solid rgba(17, 24, 39, 0.06);
-        background: rgba(251, 252, 252, 0.72);
-        padding: 7px 10px;
+        border-bottom: 1px solid rgba(21, 25, 34, 0.08);
+        background: rgba(250, 250, 249, 0.82);
+        padding: 8px 10px;
       }
 
       .history-panel[hidden] {
@@ -1694,7 +1925,7 @@ function buildShell(): string {
         min-height: 0;
         border: 1px solid rgba(17, 24, 39, 0.08);
         border-radius: 9px;
-        background: #ffffff;
+        background: var(--twyr-surface-strong);
       }
 
       .history-open {
@@ -1709,7 +1940,8 @@ function buildShell(): string {
       }
 
       .history-item-active {
-        border-color: rgba(17, 24, 39, 0.28);
+        border-color: var(--twyr-border-strong);
+        box-shadow: inset 3px 0 0 var(--twyr-primary);
       }
 
       .history-actions {
@@ -1720,15 +1952,16 @@ function buildShell(): string {
       }
 
       .micro-button {
-        min-height: 26px;
+        min-height: 28px;
         padding: 3px 6px;
         border-radius: 7px;
-        color: #6b7280;
+        color: var(--twyr-muted);
         font-size: 11px;
       }
 
       .micro-button-danger {
-        color: #9f1239;
+        border-color: rgba(180, 35, 24, 0.18);
+        color: var(--twyr-danger);
       }
 
       .history-title,
@@ -1781,21 +2014,26 @@ function buildShell(): string {
 
       button {
         appearance: none;
-        min-height: 34px;
-        border: 1px solid rgba(17, 24, 39, 0.1);
+        min-height: 36px;
+        border: 1px solid var(--twyr-border);
         border-radius: 9px;
-        background: #ffffff;
-        color: #111827;
+        background: var(--twyr-surface-strong);
+        color: var(--twyr-text);
         cursor: pointer;
         font: inherit;
         font-size: 12px;
         font-weight: 620;
-        transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+        touch-action: manipulation;
+        transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
       }
 
       button:hover {
-        border-color: rgba(17, 24, 39, 0.2);
-        background: #fbfcfc;
+        border-color: rgba(21, 25, 34, 0.18);
+        background: #fafafa;
+      }
+
+      button:active:not(:disabled) {
+        transform: translateY(1px);
       }
 
       button:disabled {
@@ -1808,39 +2046,59 @@ function buildShell(): string {
       }
 
       .icon-button {
-        min-width: 32px;
-        width: 32px;
+        min-width: 36px;
+        width: 36px;
         padding: 0;
       }
 
       .send-button {
-        min-width: 60px;
+        min-width: 66px;
         padding: 6px 12px;
-        border-color: #111827;
-        background: #111827;
+        border-color: var(--twyr-primary);
+        background: var(--twyr-primary);
         color: #ffffff;
+        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
       }
 
       .send-button:hover {
-        border-color: #000000;
-        background: #000000;
+        border-color: var(--twyr-primary-hover);
+        background: var(--twyr-primary-hover);
       }
 
       @media (prefers-color-scheme: dark) {
+        :host {
+          --twyr-bg: #0f1115;
+          --twyr-surface: rgba(17, 19, 24, 0.96);
+          --twyr-surface-strong: #171a21;
+          --twyr-surface-subtle: rgba(248, 250, 252, 0.04);
+          --twyr-text: #f8fafc;
+          --twyr-muted: #a8b0bd;
+          --twyr-border: rgba(226, 232, 240, 0.13);
+          --twyr-border-strong: rgba(248, 250, 252, 0.28);
+          --twyr-primary: #f8fafc;
+          --twyr-primary-hover: #e5e7eb;
+          --twyr-primary-soft: rgba(248, 250, 252, 0.08);
+          --twyr-danger: #fca5a5;
+          --twyr-danger-soft: rgba(127, 29, 29, 0.28);
+          --twyr-ring: rgba(248, 250, 252, 0.18);
+          --twyr-shadow: 0 18px 44px rgba(0, 0, 0, 0.28), 0 1px 1px rgba(0, 0, 0, 0.18);
+        }
+
         .dock {
-          color: #f8fafc;
+          color: var(--twyr-text);
         }
 
         .collapsed,
         .mini,
         .expanded {
-          border-color: rgba(226, 232, 240, 0.14);
-          background: rgba(15, 18, 22, 0.96);
-          box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28), 0 1px 1px rgba(0, 0, 0, 0.18);
+          border-color: var(--twyr-border);
+          background: var(--twyr-surface);
+          box-shadow: var(--twyr-shadow);
         }
 
         .topbar {
           border-color: rgba(226, 232, 240, 0.1);
+          background: linear-gradient(180deg, rgba(15, 18, 22, 0.98), rgba(17, 22, 28, 0.92));
         }
 
         .history-panel {
@@ -1850,12 +2108,22 @@ function buildShell(): string {
 
         .conversation-rail {
           border-color: rgba(226, 232, 240, 0.1);
-          background: rgba(248, 250, 252, 0.04);
+          background: rgba(248, 250, 252, 0.035);
+        }
+
+        .composer {
+          border-color: rgba(226, 232, 240, 0.1);
+          background: rgba(15, 18, 22, 0.78);
+        }
+
+        .mode {
+          border-color: rgba(248, 250, 252, 0.12);
+          background: var(--twyr-primary-soft);
+          color: #d1d5db;
         }
 
         .mode,
         .rail-heading,
-        .rail-meta,
         .rail-empty,
         .message-role,
         .history-meta,
@@ -1870,15 +2138,20 @@ function buildShell(): string {
         select,
         textarea,
         .message {
-          border-color: rgba(226, 232, 240, 0.12);
-          background: #11161c;
-          color: #f8fafc;
+          border-color: var(--twyr-border);
+          background: var(--twyr-surface-strong);
+          color: var(--twyr-text);
         }
 
         .history-item,
         .rail-item-active {
-          border-color: rgba(226, 232, 240, 0.12);
-          background: #11161c;
+          border-color: var(--twyr-border);
+          background: var(--twyr-surface-strong);
+        }
+
+        button:hover {
+          border-color: rgba(248, 250, 252, 0.22);
+          background: rgba(248, 250, 252, 0.07);
         }
 
         .topbar-tools select,
@@ -1891,7 +2164,8 @@ function buildShell(): string {
         }
 
         .message-user {
-          background: rgba(248, 250, 252, 0.06);
+          border-color: rgba(248, 250, 252, 0.16);
+          background: rgba(248, 250, 252, 0.07);
         }
 
         .message-system {
@@ -1900,6 +2174,10 @@ function buildShell(): string {
 
         .message-thinking {
           background: rgba(248, 250, 252, 0.07);
+        }
+
+        .message-queued {
+          color: #aeb7c2;
         }
 
         .message-error {
@@ -1957,6 +2235,7 @@ function buildShell(): string {
           <input data-role="mini-question" placeholder="${DEFAULT_QUESTION}" />
           <button class="icon-button" type="button" data-action="expand-dock" aria-label="展开">↗</button>
           <button class="icon-button" type="button" data-action="collapse" aria-label="折叠">−</button>
+          <button class="icon-button" type="button" data-action="stop" aria-label="停止当前回答" hidden>×</button>
           <button class="send-button" type="button" data-action="mini-send">发送</button>
         </div>
       </div>
@@ -1965,7 +2244,7 @@ function buildShell(): string {
           <div class="topbar-row">
             <div class="drag-handle" data-role="drag-handle">
               <span class="brand">Think Anytime</span>
-              <span class="mode visually-hidden" data-role="mode-label">极速默认</span>
+              <span class="mode" data-role="mode-label">极速默认</span>
             </div>
             <div class="topbar-tools" aria-label="Dock 工具栏">
               <select class="model-select" data-role="model" title="Codex 模型" aria-label="Codex 模型">
@@ -2000,6 +2279,7 @@ function buildShell(): string {
                 </div>
                 <div class="primary-actions">
                   <button class="tool-button" type="button" data-action="retry" hidden>重试</button>
+                  <button class="icon-button" type="button" data-action="stop" aria-label="停止当前回答" hidden>×</button>
                   <button class="send-button" type="button" data-action="send">发送</button>
                 </div>
               </div>
@@ -2076,10 +2356,6 @@ function buildSaveButtonTitle(): string {
   if (!lastSaveRecommendation) return "保存到 Think Anytime";
   const level = lastSaveRecommendation.level === "source" ? "card" : lastSaveRecommendation.level;
   return `按 AI 建议保存为 ${level}/${lastSaveRecommendation.cardType}`;
-}
-
-function formatReasoningPreset(): string {
-  return dockReasoningPreset === "xhigh" ? `${dockModel} · xhigh` : `${dockModel} · 极速`;
 }
 
 function formatHistoryTime(timestamp: number): string {
