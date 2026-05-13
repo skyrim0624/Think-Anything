@@ -1,6 +1,7 @@
 import {
   formatVidMarkTimestamp,
   type VidMarkClip,
+  type VidMarkSaveCardRequest,
   type VidMarkTranscriptCue,
   type VidMarkVideoMetadata,
 } from "@twyr/shared";
@@ -19,8 +20,10 @@ const roots = new WeakMap<Element, Root>();
 export interface MountVidMarkReaderOptions {
   video: VidMarkVideoMetadata;
   cues?: VidMarkTranscriptCue[];
+  clips?: VidMarkClip[];
   onClose: () => void;
   onSeek?: (timeMs: number) => void;
+  onSave?: (request: VidMarkSaveCardRequest) => Promise<void> | void;
 }
 
 export function mountVidMarkReader(host: HTMLElement, options: MountVidMarkReaderOptions): void {
@@ -33,26 +36,33 @@ export function mountVidMarkReader(host: HTMLElement, options: MountVidMarkReade
     <VidMarkReader
       video={options.video}
       cues={options.cues ?? []}
+      clips={options.clips ?? []}
       onClose={() => {
         root.unmount();
         roots.delete(host);
         options.onClose();
       }}
       onSeek={options.onSeek}
+      onSave={options.onSave}
     />,
   );
 }
 
-function VidMarkReader(props: Required<Pick<MountVidMarkReaderOptions, "video" | "cues" | "onClose">> & Pick<MountVidMarkReaderOptions, "onSeek">) {
-  const [state, setState] = useState(() => createVidMarkReaderState({ video: props.video, cues: props.cues }));
+function VidMarkReader(
+  props: Required<Pick<MountVidMarkReaderOptions, "video" | "cues" | "clips" | "onClose">> &
+    Pick<MountVidMarkReaderOptions, "onSeek" | "onSave">,
+) {
+  const [state, setState] = useState(() => createVidMarkReaderState({ video: props.video, cues: props.cues, clips: props.clips }));
   const [noteDraft, setNoteDraft] = useState("");
+  const [saveStatus, setSaveStatus] = useState("");
   useEffect(() => {
     setState((current) => ({
       ...current,
       video: props.video,
       cues: props.cues,
+      clips: props.clips,
     }));
-  }, [props.video, props.cues]);
+  }, [props.video, props.cues, props.clips]);
   const selectedCue = useMemo(
     () => state.cues.find((cue) => cue.id === state.selectedCueId),
     [state.cues, state.selectedCueId],
@@ -75,6 +85,22 @@ function VidMarkReader(props: Required<Pick<MountVidMarkReaderOptions, "video" |
     setNoteDraft("");
   }
 
+  async function saveCard(): Promise<void> {
+    if (!props.onSave) return;
+    setSaveStatus("保存中");
+    try {
+      await props.onSave({
+        video: state.video,
+        cues: state.cues,
+        clips: state.clips,
+        notes: state.notes,
+      });
+      setSaveStatus("已保存");
+    } catch {
+      setSaveStatus("保存失败");
+    }
+  }
+
   return (
     <div className="vidmark-reader">
       <header className="vidmark-reader-header">
@@ -85,10 +111,16 @@ function VidMarkReader(props: Required<Pick<MountVidMarkReaderOptions, "video" |
             {state.video.canonicalUrl}
           </a>
         </div>
-        <button className="vidmark-icon-button" type="button" onClick={props.onClose} aria-label="关闭 VidMark">
-          ×
-        </button>
+        <div className="vidmark-header-actions">
+          <button className="vidmark-save-button" type="button" onClick={() => void saveCard()} disabled={!props.onSave}>
+            保存
+          </button>
+          <button className="vidmark-icon-button" type="button" onClick={props.onClose} aria-label="关闭 VidMark">
+            ×
+          </button>
+        </div>
       </header>
+      {saveStatus ? <div className="vidmark-save-status">{saveStatus}</div> : null}
 
       <nav className="vidmark-tabs" aria-label="VidMark 视图">
         <TabButton active={state.activeTab === "transcript"} onClick={() => openTab("transcript")}>

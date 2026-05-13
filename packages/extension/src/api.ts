@@ -12,6 +12,8 @@ import {
   type PromoteSourceResponse,
   type RetrieveRequest,
   type RetrieveResponse,
+  type VidMarkHighlightsRequest,
+  type VidMarkHighlightsResponse,
   type VidMarkSaveCardRequest,
   type VidMarkSaveCardResponse,
   type VidMarkTranslateRequest,
@@ -79,6 +81,13 @@ export async function translateVidMarkTranscript(
   body: VidMarkTranslateRequest,
 ): Promise<VidMarkTranslateResponse> {
   return request<VidMarkTranslateResponse>(settings, "/api/vidmark/translate", "POST", body);
+}
+
+export async function generateVidMarkHighlights(
+  settings: ExtensionSettings,
+  body: VidMarkHighlightsRequest,
+): Promise<VidMarkHighlightsResponse> {
+  return request<VidMarkHighlightsResponse>(settings, "/api/vidmark/highlights", "POST", body);
 }
 
 export async function saveVidMarkCard(

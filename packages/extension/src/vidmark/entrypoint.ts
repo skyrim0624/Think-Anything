@@ -1,4 +1,5 @@
-import type { VidMarkTranscriptCue } from "@twyr/shared";
+import type { VidMarkClip, VidMarkTranscriptCue, VidMarkVideoMetadata } from "@twyr/shared";
+import { generateVidMarkHighlights, loadSettings, saveVidMarkCard, translateVidMarkTranscript } from "../api.js";
 import { detectVidMarkVideoPage } from "./video-page.js";
 import { mountVidMarkReader } from "./reader.js";
 import {
@@ -31,19 +32,25 @@ export function openVidMarkEntrypoint(): VidMarkEntrypointResult {
   }
 
   host.replaceChildren();
-  mountVidMarkReader(host, {
-    video: metadata,
-    onClose: () => host.remove(),
-    onSeek: seekVideo,
-  });
-  void loadYouTubeTranscript().then((cues) => {
-    if (!host.isConnected || !cues.length) return;
+  const mount = (cues: VidMarkTranscriptCue[] = [], clips: VidMarkClip[] = []) => {
     mountVidMarkReader(host, {
       video: metadata,
       cues,
+      clips,
       onClose: () => host.remove(),
       onSeek: seekVideo,
+      onSave: async (request) => {
+        const settings = await loadSettings();
+        await saveVidMarkCard(settings, request);
+      },
     });
+  };
+
+  mount();
+  void loadYouTubeTranscript().then((cues) => {
+    if (!host.isConnected || !cues.length) return;
+    mount(cues);
+    void enrichVidMarkReading(host, metadata, cues, mount);
   });
   return { ok: true };
 }
@@ -95,6 +102,11 @@ function ensureStyle(): void {
       justify-content: space-between;
       gap: 10px;
     }
+    #${HOST_ID} .vidmark-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
     #${HOST_ID} .vidmark-reader-brand {
       width: fit-content;
       border: 1px solid rgba(15, 118, 110, 0.18);
@@ -116,7 +128,8 @@ function ensureStyle(): void {
       font-size: 12px;
       text-decoration: none;
     }
-    #${HOST_ID} .vidmark-icon-button {
+    #${HOST_ID} .vidmark-icon-button,
+    #${HOST_ID} .vidmark-save-button {
       width: 28px;
       height: 28px;
       border: 1px solid rgba(17, 24, 39, 0.12);
@@ -125,6 +138,20 @@ function ensureStyle(): void {
       color: #111827;
       cursor: pointer;
       font: inherit;
+    }
+    #${HOST_ID} .vidmark-save-button {
+      width: auto;
+      min-width: 44px;
+      padding: 0 8px;
+      color: #0f766e;
+      font-weight: 680;
+    }
+    #${HOST_ID} .vidmark-save-status {
+      border-radius: 8px;
+      background: #f0fdfa;
+      color: #0f766e;
+      padding: 6px 8px;
+      font-size: 12px;
     }
     #${HOST_ID} .vidmark-tabs {
       display: grid;
@@ -256,6 +283,32 @@ function seekVideo(timeMs: number): void {
   if (!(video instanceof HTMLVideoElement)) return;
   video.currentTime = timeMs / 1000;
   void video.play();
+}
+
+async function enrichVidMarkReading(
+  host: HTMLElement,
+  video: VidMarkVideoMetadata,
+  cues: VidMarkTranscriptCue[],
+  mount: (cues: VidMarkTranscriptCue[], clips?: VidMarkClip[]) => void,
+): Promise<void> {
+  try {
+    const settings = await loadSettings();
+    const translated = await translateVidMarkTranscript(settings, {
+      video,
+      cues,
+      targetLanguage: "zh-CN",
+    });
+    if (!host.isConnected) return;
+    mount(translated.cues);
+    const highlights = await generateVidMarkHighlights(settings, {
+      video,
+      cues: translated.cues,
+    });
+    if (!host.isConnected) return;
+    mount(translated.cues, highlights.clips);
+  } catch {
+    return;
+  }
 }
 
 async function loadYouTubeTranscript(): Promise<VidMarkTranscriptCue[]> {

@@ -7,7 +7,12 @@ import { buildAskPrompt, parseModelAnswer } from "./prompt.js";
 import { RetrievalService } from "./retrieval.js";
 import { VaultService } from "./vault.js";
 import { prepareVisualContext } from "./visual-assets.js";
-import { buildVidMarkTranslatePrompt, parseVidMarkTranslateOutput } from "./vidmark.js";
+import {
+  buildVidMarkHighlightsPrompt,
+  buildVidMarkTranslatePrompt,
+  parseVidMarkHighlightsOutput,
+  parseVidMarkTranslateOutput,
+} from "./vidmark.js";
 import { shortHash } from "./markdown.js";
 import type {
   AskRequest,
@@ -17,6 +22,7 @@ import type {
   FeedbackRequest,
   PromoteSourceRequest,
   RetrieveRequest,
+  VidMarkHighlightsRequest,
   VidMarkSaveCardRequest,
   VidMarkTranslateRequest,
 } from "@twyr/shared";
@@ -57,6 +63,10 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "POST" && url.pathname === "/api/vidmark/translate") {
       await handleVidMarkTranslate(request, response);
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/vidmark/highlights") {
+      await handleVidMarkHighlights(request, response);
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/vidmark/save-card") {
@@ -294,6 +304,17 @@ async function handleVidMarkTranslate(request: IncomingMessage, response: Server
     modelReasoningEffort: "low",
   });
   const result = parseVidMarkTranslateOutput(output.text, body.cues);
+  sendJson(response, 200, result);
+}
+
+async function handleVidMarkHighlights(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const body = await readJson<VidMarkHighlightsRequest>(request);
+  const prompt = buildVidMarkHighlightsPrompt(body);
+  const output = await runCodexPrompt(prompt, config, [], {
+    model: DEFAULT_CODEX_MODEL,
+    modelReasoningEffort: "low",
+  });
+  const result = parseVidMarkHighlightsOutput(output.text, body.cues);
   sendJson(response, 200, result);
 }
 
