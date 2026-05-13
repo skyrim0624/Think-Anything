@@ -12,6 +12,8 @@ import {
   type PromoteSourceResponse,
   type RetrieveRequest,
   type RetrieveResponse,
+  type VidMarkTranslateRequest,
+  type VidMarkTranslateResponse,
   isApiErrorResponse,
 } from "@twyr/shared";
 import { SETTINGS_KEY } from "./messages.js";
@@ -68,6 +70,13 @@ export async function promoteSource(
   body: PromoteSourceRequest,
 ): Promise<PromoteSourceResponse> {
   return request<PromoteSourceResponse>(settings, "/api/promote-source", "POST", body);
+}
+
+export async function translateVidMarkTranscript(
+  settings: ExtensionSettings,
+  body: VidMarkTranslateRequest,
+): Promise<VidMarkTranslateResponse> {
+  return request<VidMarkTranslateResponse>(settings, "/api/vidmark/translate", "POST", body);
 }
 
 async function request<T>(

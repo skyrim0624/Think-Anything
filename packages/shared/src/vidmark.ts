@@ -46,6 +46,16 @@ export interface VidMarkNote {
   createdAt: string;
 }
 
+export interface VidMarkTranslateRequest {
+  video: VidMarkVideoMetadata;
+  cues: VidMarkTranscriptCue[];
+  targetLanguage: "zh-CN";
+}
+
+export interface VidMarkTranslateResponse {
+  cues: VidMarkTranscriptCue[];
+}
+
 export function sortVidMarkCues(cues: VidMarkTranscriptCue[]): VidMarkTranscriptCue[] {
   return [...cues].sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs);
 }

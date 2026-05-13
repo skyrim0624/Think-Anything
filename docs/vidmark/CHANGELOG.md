@@ -30,3 +30,10 @@
 - [进展]: 新增 YouTube caption track 元数据解析。
 - [进展]: 新增 timedtext XML 到 VidMark 字幕句的归一化能力。
 - [进展]: 字幕句会保留稳定 ID、起止时间、语言和来源类型。
+
+## [2026-05-13] 中文精译接口
+
+- [进展]: 新增 VidMark 字幕翻译请求和响应类型。
+- [进展]: Bridge 新增 VidMark 翻译 prompt 构建和 JSON 输出解析。
+- [进展]: 扩展 API 客户端新增 `/api/vidmark/translate` 调用。
+- [踩坑]: Bridge 构建配置已排除 `*.test.ts`，避免测试文件进入运行时输出。
