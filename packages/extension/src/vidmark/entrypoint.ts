@@ -153,7 +153,17 @@ function ensureStyle(): void {
       overflow: auto;
       list-style: none;
     }
-    #${HOST_ID} .vidmark-cue {
+    #${HOST_ID} .vidmark-clips {
+      display: grid;
+      gap: 8px;
+      max-height: 330px;
+      margin: 0;
+      padding: 0;
+      overflow: auto;
+      list-style: none;
+    }
+    #${HOST_ID} .vidmark-cue,
+    #${HOST_ID} .vidmark-clip {
       display: grid;
       gap: 4px;
       width: 100%;
@@ -170,6 +180,7 @@ function ensureStyle(): void {
       background: #f0fdfa;
     }
     #${HOST_ID} .vidmark-cue span,
+    #${HOST_ID} .vidmark-clip span,
     #${HOST_ID} .vidmark-note-context span,
     #${HOST_ID} .vidmark-note-list span {
       color: #0f766e;
@@ -177,13 +188,19 @@ function ensureStyle(): void {
       font-weight: 720;
     }
     #${HOST_ID} .vidmark-cue strong,
+    #${HOST_ID} .vidmark-clip strong,
     #${HOST_ID} .vidmark-note-context strong {
       color: #111827;
       font-weight: 680;
     }
-    #${HOST_ID} .vidmark-cue em {
+    #${HOST_ID} .vidmark-cue em,
+    #${HOST_ID} .vidmark-clip em {
       color: #5f6b7a;
       font-style: normal;
+    }
+    #${HOST_ID} .vidmark-clip p {
+      margin: 2px 0 0;
+      color: #374151;
     }
     #${HOST_ID} textarea {
       min-height: 84px;

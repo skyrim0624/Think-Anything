@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildVidMarkTranslatePrompt, parseVidMarkTranslateOutput } from "./vidmark.js";
+import {
+  buildVidMarkHighlightsPrompt,
+  buildVidMarkTranslatePrompt,
+  parseVidMarkHighlightsOutput,
+  parseVidMarkTranslateOutput,
+} from "./vidmark.js";
 
 const request = {
   video: {
@@ -47,4 +52,59 @@ test("parseVidMarkTranslateOutput rejects invalid JSON", () => {
     () => parseVidMarkTranslateOutput("not json", request.cues),
     /VidMark 翻译输出不是有效 JSON/,
   );
+});
+
+test("buildVidMarkHighlightsPrompt asks for all clip types", () => {
+  const prompt = buildVidMarkHighlightsPrompt({ video: request.video, cues: request.cues });
+
+  assert.match(prompt, /Demo Video/);
+  assert.match(prompt, /insight/);
+  assert.match(prompt, /case/);
+  assert.match(prompt, /method/);
+  assert.match(prompt, /quote/);
+  assert.match(prompt, /dispute/);
+  assert.match(prompt, /action/);
+});
+
+test("parseVidMarkHighlightsOutput normalizes clips to cue boundaries", () => {
+  const response = parseVidMarkHighlightsOutput(
+    JSON.stringify({
+      clips: [
+        {
+          id: "clip-1",
+          title: "Key idea",
+          type: "insight",
+          summary: "The speaker names the key idea.",
+          startMs: 0,
+          endMs: 99_000,
+          cueIds: ["cue-0001", "cue-0002"],
+        },
+      ],
+    }),
+    request.cues,
+  );
+
+  assert.equal(response.clips[0]?.startMs, 1000);
+  assert.equal(response.clips[0]?.endMs, 4600);
+});
+
+test("parseVidMarkHighlightsOutput ignores clips without matching cues", () => {
+  const response = parseVidMarkHighlightsOutput(
+    JSON.stringify({
+      clips: [
+        {
+          id: "clip-missing",
+          title: "Missing",
+          type: "insight",
+          summary: "No matching cue.",
+          startMs: 0,
+          endMs: 99_000,
+          cueIds: ["missing"],
+        },
+      ],
+    }),
+    request.cues,
+  );
+
+  assert.deepEqual(response.clips, []);
 });

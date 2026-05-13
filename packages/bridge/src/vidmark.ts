@@ -1,5 +1,13 @@
-import type { VidMarkTranslateRequest, VidMarkTranslateResponse, VidMarkTranscriptCue } from "@twyr/shared";
-import { formatVidMarkTimestamp } from "@twyr/shared";
+import type {
+  VidMarkClip,
+  VidMarkClipType,
+  VidMarkHighlightsRequest,
+  VidMarkHighlightsResponse,
+  VidMarkTranslateRequest,
+  VidMarkTranslateResponse,
+  VidMarkTranscriptCue,
+} from "@twyr/shared";
+import { formatVidMarkTimestamp, normalizeVidMarkClip } from "@twyr/shared";
 
 interface TranslationItem {
   id: string;
@@ -73,6 +81,76 @@ export function parseVidMarkTranslateOutput(
   };
 }
 
+export function buildVidMarkHighlightsPrompt(request: VidMarkHighlightsRequest): string {
+  const cues = request.cues
+    .map((cue) => `[${formatVidMarkTimestamp(cue.startMs)}] ${cue.id}: ${cue.translatedText ?? cue.text}`)
+    .join("\n");
+
+  return [
+    "你是 VidMark 的视频高能片段编辑。",
+    "",
+    "任务：从字幕中选出最值得跳转复看的片段。",
+    "",
+    "片段类型必须使用以下英文枚举之一：",
+    "- insight：核心观点",
+    "- case：案例",
+    "- method：方法论",
+    "- quote：金句",
+    "- dispute：争议点",
+    "- action：行动建议",
+    "",
+    "硬性规则：",
+    "- 只输出 JSON，不要 Markdown 代码块，不要解释。",
+    "- 每个片段必须引用已有 cueIds。",
+    "- 不要发明字幕中没有的信息。",
+    "- 优先少而精，最多 8 个片段。",
+    "",
+    "输出格式：",
+    "{",
+    '  "clips": [',
+    '    { "id": "clip-1", "title": "片段标题", "type": "insight", "summary": "为什么重要", "startMs": 1000, "endMs": 4600, "cueIds": ["cue-0001"] }',
+    "  ]",
+    "}",
+    "",
+    "视频信息：",
+    JSON.stringify(
+      {
+        title: request.video.title,
+        url: request.video.canonicalUrl,
+        platform: request.video.platform,
+      },
+      null,
+      2,
+    ),
+    "",
+    "字幕：",
+    cues,
+  ].join("\n");
+}
+
+export function parseVidMarkHighlightsOutput(
+  output: string,
+  cues: VidMarkTranscriptCue[],
+): VidMarkHighlightsResponse {
+  const jsonText = extractJsonObject(output);
+  if (!jsonText) {
+    throw new Error("VidMark 高能片段输出不是有效 JSON。");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    throw new Error("VidMark 高能片段输出不是有效 JSON。");
+  }
+
+  return {
+    clips: readClips(parsed)
+      .map((clip) => normalizeVidMarkClip(clip, cues))
+      .filter((clip) => clip.cueIds.some((cueId) => cues.some((cue) => cue.id === cueId))),
+  };
+}
+
 function readTranslations(value: unknown): TranslationItem[] {
   if (!value || typeof value !== "object") {
     throw new Error("VidMark 翻译输出缺少 translations。");
@@ -91,6 +169,59 @@ function readTranslations(value: unknown): TranslationItem[] {
       return { id: record.id, translatedText };
     })
     .filter((item): item is TranslationItem => Boolean(item));
+}
+
+function readClips(value: unknown): VidMarkClip[] {
+  if (!value || typeof value !== "object") {
+    throw new Error("VidMark 高能片段输出缺少 clips。");
+  }
+  const clips = (value as { clips?: unknown }).clips;
+  if (!Array.isArray(clips)) {
+    throw new Error("VidMark 高能片段输出缺少 clips。");
+  }
+  return clips
+    .map((item) => {
+      if (!item || typeof item !== "object") return undefined;
+      const record = item as Record<string, unknown>;
+      const id = stringValue(record.id);
+      const title = stringValue(record.title);
+      const type = clipTypeValue(record.type);
+      const summary = stringValue(record.summary);
+      const cueIds = Array.isArray(record.cueIds) ? record.cueIds.filter((cueId): cueId is string => typeof cueId === "string") : [];
+      if (!id || !title || !type || !summary || !cueIds.length) return undefined;
+      return {
+        id,
+        title,
+        type,
+        summary,
+        startMs: numberValue(record.startMs) ?? 0,
+        endMs: numberValue(record.endMs) ?? 0,
+        cueIds,
+      };
+    })
+    .filter((item): item is VidMarkClip => Boolean(item));
+}
+
+function clipTypeValue(value: unknown): VidMarkClipType | undefined {
+  if (
+    value === "insight" ||
+    value === "case" ||
+    value === "method" ||
+    value === "quote" ||
+    value === "dispute" ||
+    value === "action"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function extractJsonObject(text: string): string | undefined {

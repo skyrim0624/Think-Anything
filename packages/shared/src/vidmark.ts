@@ -56,6 +56,15 @@ export interface VidMarkTranslateResponse {
   cues: VidMarkTranscriptCue[];
 }
 
+export interface VidMarkHighlightsRequest {
+  video: VidMarkVideoMetadata;
+  cues: VidMarkTranscriptCue[];
+}
+
+export interface VidMarkHighlightsResponse {
+  clips: VidMarkClip[];
+}
+
 export function sortVidMarkCues(cues: VidMarkTranscriptCue[]): VidMarkTranscriptCue[] {
   return [...cues].sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs);
 }

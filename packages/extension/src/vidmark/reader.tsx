@@ -1,4 +1,9 @@
-import { formatVidMarkTimestamp, type VidMarkTranscriptCue, type VidMarkVideoMetadata } from "@twyr/shared";
+import {
+  formatVidMarkTimestamp,
+  type VidMarkClip,
+  type VidMarkTranscriptCue,
+  type VidMarkVideoMetadata,
+} from "@twyr/shared";
 import { createRoot, type Root } from "react-dom/client";
 import { useMemo, useState } from "react";
 import {
@@ -94,7 +99,7 @@ function VidMarkReader(props: Required<Pick<MountVidMarkReaderOptions, "video" |
         {state.activeTab === "transcript" ? (
           <TranscriptView cues={state.cues} selectedCueId={state.selectedCueId} onSelect={selectCue} />
         ) : null}
-        {state.activeTab === "clips" ? <EmptyState text="高能片段会在翻译后生成。" /> : null}
+        {state.activeTab === "clips" ? <ClipsView clips={state.clips} onSelect={(clip) => props.onSeek?.(clip.startMs)} /> : null}
         {state.activeTab === "notes" ? (
           <NotesView
             noteDraft={noteDraft}
@@ -135,6 +140,26 @@ function TranscriptView(props: {
             <span>{formatVidMarkTimestamp(cue.startMs)}</span>
             <strong>{cue.text}</strong>
             {cue.translatedText ? <em>{cue.translatedText}</em> : null}
+          </button>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function ClipsView(props: { clips: VidMarkClip[]; onSelect: (clip: VidMarkClip) => void }) {
+  if (!props.clips.length) return <EmptyState text="高能片段会在翻译后生成。" />;
+  return (
+    <ol className="vidmark-clips">
+      {props.clips.map((clip) => (
+        <li key={clip.id}>
+          <button className="vidmark-clip" type="button" onClick={() => props.onSelect(clip)}>
+            <span>
+              {formatVidMarkTimestamp(clip.startMs)}-{formatVidMarkTimestamp(clip.endMs)}
+            </span>
+            <strong>{clip.title}</strong>
+            <em>{clip.type}</em>
+            <p>{clip.summary}</p>
           </button>
         </li>
       ))}
