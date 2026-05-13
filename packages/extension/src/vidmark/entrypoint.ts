@@ -1,4 +1,5 @@
 import { detectVidMarkVideoPage } from "./video-page.js";
+import { mountVidMarkReader } from "./reader.js";
 
 const HOST_ID = "twyr-vidmark-host";
 const STYLE_ID = "twyr-vidmark-style";
@@ -22,18 +23,12 @@ export function openVidMarkEntrypoint(): VidMarkEntrypointResult {
     return { ok: false, reason: "unsupported-page" };
   }
 
-  host.innerHTML = [
-    '<div class="vidmark-shell">',
-    '<div class="vidmark-header">',
-    "<strong>VidMark</strong>",
-    '<button type="button" data-vidmark-close aria-label="关闭 VidMark">×</button>',
-    "</div>",
-    `<div class="vidmark-title">${escapeHtml(metadata.title)}</div>`,
-    `<div class="vidmark-meta">${escapeHtml(metadata.canonicalUrl)}</div>`,
-    '<div class="vidmark-status">视频已识别。下一阶段会接入字幕读取与中文精译。</div>',
-    "</div>",
-  ].join("");
-  host.querySelector("[data-vidmark-close]")?.addEventListener("click", () => host.remove());
+  host.replaceChildren();
+  mountVidMarkReader(host, {
+    video: metadata,
+    onClose: () => host.remove(),
+    onSeek: seekVideo,
+  });
   return { ok: true };
 }
 
@@ -70,13 +65,42 @@ function ensureStyle(): void {
       display: grid;
       gap: 10px;
     }
-    #${HOST_ID} .vidmark-header {
+    #${HOST_ID} .vidmark-reader,
+    #${HOST_ID} .vidmark-reader-heading,
+    #${HOST_ID} .vidmark-reader-body,
+    #${HOST_ID} .vidmark-notes,
+    #${HOST_ID} .vidmark-note-list {
+      display: grid;
+      gap: 10px;
+    }
+    #${HOST_ID} .vidmark-reader-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 10px;
     }
-    #${HOST_ID} [data-vidmark-close] {
+    #${HOST_ID} .vidmark-reader-brand {
+      width: fit-content;
+      border: 1px solid rgba(15, 118, 110, 0.18);
+      border-radius: 999px;
+      padding: 2px 7px;
+      background: #ccfbf1;
+      color: #134e4a;
+      font-size: 11px;
+      font-weight: 760;
+    }
+    #${HOST_ID} h2 {
+      margin: 0;
+      color: #111827;
+      font-size: 15px;
+      line-height: 1.35;
+    }
+    #${HOST_ID} a {
+      color: #0f766e;
+      font-size: 12px;
+      text-decoration: none;
+    }
+    #${HOST_ID} .vidmark-icon-button {
       width: 28px;
       height: 28px;
       border: 1px solid rgba(17, 24, 39, 0.12);
@@ -86,13 +110,103 @@ function ensureStyle(): void {
       cursor: pointer;
       font: inherit;
     }
-    #${HOST_ID} .vidmark-title {
-      font-weight: 720;
+    #${HOST_ID} .vidmark-tabs {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 4px;
+      border-radius: 9px;
+      background: #f2f7f6;
+      padding: 4px;
     }
-    #${HOST_ID} .vidmark-meta,
-    #${HOST_ID} .vidmark-status {
+    #${HOST_ID} .vidmark-tab,
+    #${HOST_ID} .vidmark-primary-button {
+      min-height: 32px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      color: #374151;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 680;
+    }
+    #${HOST_ID} .vidmark-tab-active,
+    #${HOST_ID} .vidmark-primary-button {
+      border-color: rgba(15, 118, 110, 0.22);
+      background: #ffffff;
+      color: #0f766e;
+    }
+    #${HOST_ID} .vidmark-empty {
+      border: 1px dashed rgba(15, 118, 110, 0.22);
+      border-radius: 9px;
+      padding: 14px;
+      background: #f8fbfb;
       color: #5f6b7a;
       font-size: 12px;
+    }
+    #${HOST_ID} .vidmark-transcript {
+      display: grid;
+      gap: 6px;
+      max-height: 330px;
+      margin: 0;
+      padding: 0;
+      overflow: auto;
+      list-style: none;
+    }
+    #${HOST_ID} .vidmark-cue {
+      display: grid;
+      gap: 4px;
+      width: 100%;
+      border: 1px solid rgba(17, 24, 39, 0.08);
+      border-radius: 8px;
+      padding: 8px;
+      background: #ffffff;
+      text-align: left;
+      cursor: pointer;
+      font: inherit;
+    }
+    #${HOST_ID} .vidmark-cue-active {
+      border-color: rgba(15, 118, 110, 0.32);
+      background: #f0fdfa;
+    }
+    #${HOST_ID} .vidmark-cue span,
+    #${HOST_ID} .vidmark-note-context span,
+    #${HOST_ID} .vidmark-note-list span {
+      color: #0f766e;
+      font-size: 11px;
+      font-weight: 720;
+    }
+    #${HOST_ID} .vidmark-cue strong,
+    #${HOST_ID} .vidmark-note-context strong {
+      color: #111827;
+      font-weight: 680;
+    }
+    #${HOST_ID} .vidmark-cue em {
+      color: #5f6b7a;
+      font-style: normal;
+    }
+    #${HOST_ID} textarea {
+      min-height: 84px;
+      border: 1px solid rgba(17, 24, 39, 0.12);
+      border-radius: 9px;
+      padding: 9px;
+      color: #111827;
+      font: inherit;
+      resize: vertical;
+    }
+    #${HOST_ID} .vidmark-primary-button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+    #${HOST_ID} .vidmark-note-list article {
+      border: 1px solid rgba(17, 24, 39, 0.08);
+      border-radius: 8px;
+      padding: 8px;
+      background: #ffffff;
+    }
+    #${HOST_ID} .vidmark-note-list p {
+      margin: 3px 0 0;
+      color: #111827;
     }
   `;
   document.documentElement.append(style);
@@ -104,10 +218,9 @@ function getCurrentVideoTimeMs(): number | undefined {
   return Math.floor(video.currentTime * 1000);
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+function seekVideo(timeMs: number): void {
+  const video = document.querySelector("video");
+  if (!(video instanceof HTMLVideoElement)) return;
+  video.currentTime = timeMs / 1000;
+  void video.play();
 }
