@@ -2,10 +2,11 @@ import {
   formatVidMarkTimestamp,
   type VidMarkClip,
   type VidMarkSaveCardRequest,
+  type VidMarkStudyGuide,
   type VidMarkTranscriptCue,
   type VidMarkVideoMetadata,
 } from "@twyr/shared";
-import { ExternalLink, FileText, PenLine, Save, Star, X } from "lucide-react";
+import { ExternalLink, FileText, Lightbulb, MessageCircleQuestion, PenLine, Quote, Save, Sparkles, Star, X } from "lucide-react";
 import { createRoot, type Root } from "react-dom/client";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
@@ -22,6 +23,7 @@ export interface MountVidMarkReaderOptions {
   video: VidMarkVideoMetadata;
   cues?: VidMarkTranscriptCue[];
   clips?: VidMarkClip[];
+  guide?: VidMarkStudyGuide;
   onClose: () => void;
   onSeek?: (timeMs: number) => void;
   onSave?: (request: VidMarkSaveCardRequest) => Promise<void> | void;
@@ -38,6 +40,7 @@ export function mountVidMarkReader(host: HTMLElement, options: MountVidMarkReade
       video={options.video}
       cues={options.cues ?? []}
       clips={options.clips ?? []}
+      guide={options.guide}
       onClose={() => {
         root.unmount();
         roots.delete(host);
@@ -51,9 +54,11 @@ export function mountVidMarkReader(host: HTMLElement, options: MountVidMarkReade
 
 function VidMarkReader(
   props: Required<Pick<MountVidMarkReaderOptions, "video" | "cues" | "clips" | "onClose">> &
-    Pick<MountVidMarkReaderOptions, "onSeek" | "onSave">,
+    Pick<MountVidMarkReaderOptions, "guide" | "onSeek" | "onSave">,
 ) {
-  const [state, setState] = useState(() => createVidMarkReaderState({ video: props.video, cues: props.cues, clips: props.clips }));
+  const [state, setState] = useState(() =>
+    createVidMarkReaderState({ video: props.video, cues: props.cues, clips: props.clips, guide: props.guide }),
+  );
   const [noteDraft, setNoteDraft] = useState("");
   const [saveStatus, setSaveStatus] = useState<{ tone: "saving" | "success" | "error"; text: string }>();
   const isSaving = saveStatus?.tone === "saving";
@@ -63,8 +68,9 @@ function VidMarkReader(
       video: props.video,
       cues: props.cues,
       clips: props.clips,
+      guide: props.guide,
     }));
-  }, [props.video, props.cues, props.clips]);
+  }, [props.video, props.cues, props.clips, props.guide]);
   const selectedCue = useMemo(
     () => state.cues.find((cue) => cue.id === state.selectedCueId),
     [state.cues, state.selectedCueId],
@@ -96,6 +102,7 @@ function VidMarkReader(
         cues: state.cues,
         clips: state.clips,
         notes: state.notes,
+        guide: state.guide,
       });
       setSaveStatus({ tone: "success", text: "已保存" });
     } catch {
@@ -131,11 +138,14 @@ function VidMarkReader(
       ) : null}
 
       <nav className="vidmark-tabs" aria-label="VidMark 视图">
-        <TabButton active={state.activeTab === "transcript"} icon={<FileText size={15} aria-hidden="true" />} onClick={() => openTab("transcript")}>
-          字幕
+        <TabButton active={state.activeTab === "study"} icon={<Sparkles size={15} aria-hidden="true" />} onClick={() => openTab("study")}>
+          学习
         </TabButton>
         <TabButton active={state.activeTab === "clips"} icon={<Star size={15} aria-hidden="true" />} onClick={() => openTab("clips")}>
-          高能
+          片段
+        </TabButton>
+        <TabButton active={state.activeTab === "transcript"} icon={<FileText size={15} aria-hidden="true" />} onClick={() => openTab("transcript")}>
+          字幕
         </TabButton>
         <TabButton active={state.activeTab === "notes"} icon={<PenLine size={15} aria-hidden="true" />} onClick={() => openTab("notes")}>
           笔记
@@ -143,6 +153,15 @@ function VidMarkReader(
       </nav>
 
       <main className="vidmark-reader-body">
+        {state.activeTab === "study" ? (
+          <StudyView
+            guide={state.guide}
+            clips={state.clips}
+            cues={state.cues}
+            onSelectClip={(clip) => props.onSeek?.(clip.startMs)}
+            onSelectCue={selectCue}
+          />
+        ) : null}
         {state.activeTab === "transcript" ? (
           <TranscriptView cues={state.cues} selectedCueId={state.selectedCueId} onSelect={selectCue} />
         ) : null}
@@ -167,6 +186,134 @@ function TabButton(props: { active: boolean; children: string; icon: ReactNode; 
       {props.icon}
       {props.children}
     </button>
+  );
+}
+
+function StudyView(props: {
+  guide?: VidMarkStudyGuide;
+  clips: VidMarkClip[];
+  cues: VidMarkTranscriptCue[];
+  onSelectClip: (clip: VidMarkClip) => void;
+  onSelectCue: (cueId: string) => void;
+}) {
+  const guide = props.guide ?? buildFallbackStudyGuide(props.clips, props.cues);
+  const clipMap = new Map(props.clips.map((clip) => [clip.id, clip]));
+  const cueMap = new Map(props.cues.map((cue) => [cue.id, cue]));
+  if (!props.cues.length) return <EmptyState text="正在读取字幕；读取完成后会先生成学习导览，再进入精读。" />;
+  return (
+    <section className="vidmark-study">
+      <section className="vidmark-study-hero">
+        <span>快速预览</span>
+        <p>{guide.quickPreview}</p>
+      </section>
+
+      <section className="vidmark-study-section">
+        <h3>
+          <Lightbulb size={15} aria-hidden="true" />
+          先看这几段
+        </h3>
+        <div className="vidmark-study-list">
+          {guide.learningPath.length ? (
+            guide.learningPath.map((item) => {
+              const clip = clipMap.get(item.clipId);
+              return (
+                <button
+                  className="vidmark-study-item"
+                  key={item.clipId}
+                  type="button"
+                  onClick={() => (clip ? props.onSelectClip(clip) : undefined)}
+                  disabled={!clip}
+                >
+                  <span>{clip ? `${formatVidMarkTimestamp(clip.startMs)}-${formatVidMarkTimestamp(clip.endMs)}` : item.clipId}</span>
+                  <strong>{clip?.title ?? item.clipId}</strong>
+                  <p>{item.why}</p>
+                  <em>{item.question}</em>
+                </button>
+              );
+            })
+          ) : (
+            <EmptyState text="高能片段生成后，这里会变成学习路径。" />
+          )}
+        </div>
+      </section>
+
+      {guide.keyTakeaways.length ? (
+        <section className="vidmark-study-section">
+          <h3>
+            <Star size={15} aria-hidden="true" />
+            关键收获
+          </h3>
+          <ul className="vidmark-study-bullets">
+            {guide.keyTakeaways.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {guide.suggestedQuestions.length ? (
+        <section className="vidmark-study-section">
+          <h3>
+            <MessageCircleQuestion size={15} aria-hidden="true" />
+            带着问题看
+          </h3>
+          <div className="vidmark-question-list">
+            {guide.suggestedQuestions.map((question) => {
+              const cueId = question.cueIds?.find((id) => cueMap.has(id));
+              return (
+                <button
+                  className="vidmark-question"
+                  key={question.id}
+                  type="button"
+                  onClick={() => (cueId ? props.onSelectCue(cueId) : undefined)}
+                  disabled={!cueId}
+                >
+                  {question.question}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      {guide.memorableQuotes.length ? (
+        <section className="vidmark-study-section">
+          <h3>
+            <Quote size={15} aria-hidden="true" />
+            值得记住
+          </h3>
+          <div className="vidmark-quote-list">
+            {guide.memorableQuotes.map((quote) => (
+              <button
+                className="vidmark-quote"
+                key={quote.id}
+                type="button"
+                onClick={() => (quote.cueId ? props.onSelectCue(quote.cueId) : undefined)}
+                disabled={!quote.cueId}
+              >
+                <strong>{quote.translatedText ?? quote.text}</strong>
+                {quote.translatedText ? <em>{quote.text}</em> : null}
+                <p>{quote.reason}</p>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {guide.glossary.length ? (
+        <section className="vidmark-study-section">
+          <h3>术语</h3>
+          <dl className="vidmark-glossary">
+            {guide.glossary.map((item) => (
+              <div key={item.term}>
+                <dt>{item.term}</dt>
+                <dd>{item.explanation}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ) : null}
+    </section>
   );
 }
 
@@ -262,6 +409,31 @@ function NotesView(props: {
 
 function EmptyState(props: { text: string }) {
   return <div className="vidmark-empty">{props.text}</div>;
+}
+
+function buildFallbackStudyGuide(clips: VidMarkClip[], cues: VidMarkTranscriptCue[]): VidMarkStudyGuide {
+  return {
+    quickPreview: clips.length
+      ? "先从高能片段建立主线，再回到字幕里补细节。"
+      : "字幕已载入，正在生成学习导览。你也可以先从字幕里选择一句开始做笔记。",
+    learningPath: clips.slice(0, 3).map((clip) => ({
+      clipId: clip.id,
+      why: clip.summary,
+      question: "这一段可以迁移到我的哪个真实问题里？",
+    })),
+    keyTakeaways: clips.slice(0, 4).map((clip) => clip.title),
+    suggestedQuestions: cues.length
+      ? [
+          {
+            id: "q1",
+            question: "这段视频最核心的判断是什么？",
+            cueIds: [cues[0]!.id],
+          },
+        ]
+      : [],
+    memorableQuotes: [],
+    glossary: [],
+  };
 }
 
 function formatSourceLabel(value: string): string {

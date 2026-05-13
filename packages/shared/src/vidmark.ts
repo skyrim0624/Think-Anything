@@ -35,6 +35,40 @@ export interface VidMarkClip {
   cueIds: string[];
 }
 
+export interface VidMarkLearningPathItem {
+  clipId: string;
+  why: string;
+  question: string;
+}
+
+export interface VidMarkStudyQuestion {
+  id: string;
+  question: string;
+  cueIds?: string[];
+}
+
+export interface VidMarkMemorableQuote {
+  id: string;
+  text: string;
+  translatedText?: string;
+  reason: string;
+  cueId?: string;
+}
+
+export interface VidMarkGlossaryItem {
+  term: string;
+  explanation: string;
+}
+
+export interface VidMarkStudyGuide {
+  quickPreview: string;
+  learningPath: VidMarkLearningPathItem[];
+  keyTakeaways: string[];
+  suggestedQuestions: VidMarkStudyQuestion[];
+  memorableQuotes: VidMarkMemorableQuote[];
+  glossary: VidMarkGlossaryItem[];
+}
+
 export interface VidMarkNote {
   id: string;
   cueId?: string;
@@ -65,11 +99,22 @@ export interface VidMarkHighlightsResponse {
   clips: VidMarkClip[];
 }
 
+export interface VidMarkStudyGuideRequest {
+  video: VidMarkVideoMetadata;
+  cues: VidMarkTranscriptCue[];
+  clips: VidMarkClip[];
+}
+
+export interface VidMarkStudyGuideResponse {
+  guide: VidMarkStudyGuide;
+}
+
 export interface VidMarkSaveCardRequest {
   video: VidMarkVideoMetadata;
   cues: VidMarkTranscriptCue[];
   clips: VidMarkClip[];
   notes: VidMarkNote[];
+  guide?: VidMarkStudyGuide;
 }
 
 export interface VidMarkSaveCardResponse {

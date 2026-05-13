@@ -16,6 +16,8 @@ import {
   type VidMarkHighlightsResponse,
   type VidMarkSaveCardRequest,
   type VidMarkSaveCardResponse,
+  type VidMarkStudyGuideRequest,
+  type VidMarkStudyGuideResponse,
   type VidMarkTranslateRequest,
   type VidMarkTranslateResponse,
   isApiErrorResponse,
@@ -88,6 +90,13 @@ export async function generateVidMarkHighlights(
   body: VidMarkHighlightsRequest,
 ): Promise<VidMarkHighlightsResponse> {
   return request<VidMarkHighlightsResponse>(settings, "/api/vidmark/highlights", "POST", body);
+}
+
+export async function generateVidMarkStudyGuide(
+  settings: ExtensionSettings,
+  body: VidMarkStudyGuideRequest,
+): Promise<VidMarkStudyGuideResponse> {
+  return request<VidMarkStudyGuideResponse>(settings, "/api/vidmark/study-guide", "POST", body);
 }
 
 export async function saveVidMarkCard(

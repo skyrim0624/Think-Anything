@@ -27,7 +27,13 @@ test("setVidMarkTab switches the active reader tab", () => {
   const next = setVidMarkTab(state, "notes");
 
   assert.equal(next.activeTab, "notes");
-  assert.equal(state.activeTab, "transcript");
+  assert.equal(state.activeTab, "study");
+});
+
+test("createVidMarkReaderState starts from the learning view", () => {
+  const state = createVidMarkReaderState({ video, cues });
+
+  assert.equal(state.activeTab, "study");
 });
 
 test("selectVidMarkCue stores the selected cue id and timestamp", () => {

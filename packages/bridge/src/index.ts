@@ -9,8 +9,10 @@ import { VaultService } from "./vault.js";
 import { prepareVisualContext } from "./visual-assets.js";
 import {
   buildVidMarkHighlightsPrompt,
+  buildVidMarkStudyGuidePrompt,
   buildVidMarkTranslatePrompt,
   parseVidMarkHighlightsOutput,
+  parseVidMarkStudyGuideOutput,
   parseVidMarkTranslateOutput,
 } from "./vidmark.js";
 import { shortHash } from "./markdown.js";
@@ -24,6 +26,7 @@ import type {
   RetrieveRequest,
   VidMarkHighlightsRequest,
   VidMarkSaveCardRequest,
+  VidMarkStudyGuideRequest,
   VidMarkTranslateRequest,
 } from "@twyr/shared";
 import { DEFAULT_CODEX_MODEL, type TwyrModelReasoningEffort } from "@twyr/shared";
@@ -67,6 +70,10 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "POST" && url.pathname === "/api/vidmark/highlights") {
       await handleVidMarkHighlights(request, response);
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/vidmark/study-guide") {
+      await handleVidMarkStudyGuide(request, response);
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/vidmark/save-card") {
@@ -315,6 +322,17 @@ async function handleVidMarkHighlights(request: IncomingMessage, response: Serve
     modelReasoningEffort: "low",
   });
   const result = parseVidMarkHighlightsOutput(output.text, body.cues);
+  sendJson(response, 200, result);
+}
+
+async function handleVidMarkStudyGuide(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const body = await readJson<VidMarkStudyGuideRequest>(request);
+  const prompt = buildVidMarkStudyGuidePrompt(body);
+  const output = await runCodexPrompt(prompt, config, [], {
+    model: DEFAULT_CODEX_MODEL,
+    modelReasoningEffort: "medium",
+  });
+  const result = parseVidMarkStudyGuideOutput(output.text, body.cues);
   sendJson(response, 200, result);
 }
 

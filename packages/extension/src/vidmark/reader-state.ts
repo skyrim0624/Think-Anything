@@ -1,11 +1,12 @@
-import type { VidMarkClip, VidMarkNote, VidMarkTranscriptCue, VidMarkVideoMetadata } from "@twyr/shared";
+import type { VidMarkClip, VidMarkNote, VidMarkStudyGuide, VidMarkTranscriptCue, VidMarkVideoMetadata } from "@twyr/shared";
 
-export type VidMarkReaderTab = "transcript" | "clips" | "notes";
+export type VidMarkReaderTab = "study" | "clips" | "transcript" | "notes";
 
 export interface VidMarkReaderState {
   video: VidMarkVideoMetadata;
   cues: VidMarkTranscriptCue[];
   clips: VidMarkClip[];
+  guide?: VidMarkStudyGuide;
   notes: VidMarkNote[];
   activeTab: VidMarkReaderTab;
   selectedCueId?: string;
@@ -16,6 +17,7 @@ export interface CreateVidMarkReaderStateInput {
   video: VidMarkVideoMetadata;
   cues?: VidMarkTranscriptCue[];
   clips?: VidMarkClip[];
+  guide?: VidMarkStudyGuide;
   notes?: VidMarkNote[];
   currentTimeMs?: number;
 }
@@ -25,8 +27,9 @@ export function createVidMarkReaderState(input: CreateVidMarkReaderStateInput): 
     video: input.video,
     cues: input.cues ?? [],
     clips: input.clips ?? [],
+    guide: input.guide,
     notes: input.notes ?? [],
-    activeTab: "transcript",
+    activeTab: "study",
     currentTimeMs: input.currentTimeMs ?? input.video.currentTimeMs ?? 0,
   };
 }

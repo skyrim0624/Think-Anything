@@ -1,5 +1,5 @@
-import type { VidMarkClip, VidMarkTranscriptCue, VidMarkVideoMetadata } from "@twyr/shared";
-import { generateVidMarkHighlights, loadSettings, saveVidMarkCard, translateVidMarkTranscript } from "../api.js";
+import type { VidMarkClip, VidMarkStudyGuide, VidMarkTranscriptCue, VidMarkVideoMetadata } from "@twyr/shared";
+import { generateVidMarkHighlights, generateVidMarkStudyGuide, loadSettings, saveVidMarkCard, translateVidMarkTranscript } from "../api.js";
 import { detectVidMarkVideoPage } from "./video-page.js";
 import { mountVidMarkReader } from "./reader.js";
 import {
@@ -32,11 +32,12 @@ export function openVidMarkEntrypoint(): VidMarkEntrypointResult {
   }
 
   host.replaceChildren();
-  const mount = (cues: VidMarkTranscriptCue[] = [], clips: VidMarkClip[] = []) => {
+  const mount = (cues: VidMarkTranscriptCue[] = [], clips: VidMarkClip[] = [], guide?: VidMarkStudyGuide) => {
     mountVidMarkReader(host, {
       video: metadata,
       cues,
       clips,
+      guide,
       onClose: () => host.remove(),
       onSeek: seekVideo,
       onSave: async (request) => {
@@ -273,7 +274,7 @@ function ensureStyle(): void {
     }
     #${HOST_ID} .vidmark-tabs {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 3px;
       border: 1px solid var(--vidmark-line);
       border-radius: 8px;
@@ -316,6 +317,144 @@ function ensureStyle(): void {
       overflow: auto;
       list-style: none;
       scrollbar-width: thin;
+    }
+    #${HOST_ID} .vidmark-study {
+      display: grid;
+      gap: 12px;
+      max-height: min(500px, 62dvh);
+      overflow: auto;
+      scrollbar-width: thin;
+      padding-right: 1px;
+    }
+    #${HOST_ID} .vidmark-study-hero {
+      display: grid;
+      gap: 6px;
+      border: 1px solid rgba(13, 148, 136, 0.18);
+      border-radius: 8px;
+      background: linear-gradient(180deg, #f0fdfa 0%, #ffffff 100%);
+      padding: 12px;
+    }
+    #${HOST_ID} .vidmark-study-hero span,
+    #${HOST_ID} .vidmark-study-section h3 {
+      color: var(--vidmark-accent-strong);
+      font-size: 12px;
+      font-weight: 760;
+    }
+    #${HOST_ID} .vidmark-study-hero p {
+      margin: 0;
+      color: var(--vidmark-ink);
+      font-size: 15px;
+      line-height: 1.55;
+      font-weight: 680;
+    }
+    #${HOST_ID} .vidmark-study-section {
+      display: grid;
+      gap: 8px;
+    }
+    #${HOST_ID} .vidmark-study-section h3 {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+      letter-spacing: 0;
+    }
+    #${HOST_ID} .vidmark-study-list,
+    #${HOST_ID} .vidmark-question-list,
+    #${HOST_ID} .vidmark-quote-list {
+      display: grid;
+      gap: 7px;
+    }
+    #${HOST_ID} .vidmark-study-item,
+    #${HOST_ID} .vidmark-question,
+    #${HOST_ID} .vidmark-quote {
+      display: grid;
+      gap: 6px;
+      width: 100%;
+      min-height: 44px;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-radius: 8px;
+      padding: 10px;
+      background: #ffffff;
+      color: var(--vidmark-ink);
+      text-align: left;
+      cursor: pointer;
+      font: inherit;
+      transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+    }
+    #${HOST_ID} .vidmark-study-item:hover,
+    #${HOST_ID} .vidmark-question:hover,
+    #${HOST_ID} .vidmark-quote:hover {
+      border-color: var(--vidmark-line-strong);
+      background: var(--vidmark-softer);
+    }
+    #${HOST_ID} .vidmark-study-item:focus-visible,
+    #${HOST_ID} .vidmark-question:focus-visible,
+    #${HOST_ID} .vidmark-quote:focus-visible {
+      outline: none;
+      border-color: var(--vidmark-accent);
+      box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.16);
+    }
+    #${HOST_ID} .vidmark-study-item:disabled,
+    #${HOST_ID} .vidmark-question:disabled,
+    #${HOST_ID} .vidmark-quote:disabled {
+      cursor: default;
+      opacity: 0.72;
+    }
+    #${HOST_ID} .vidmark-study-item span {
+      color: var(--vidmark-accent-strong);
+      font-size: 11px;
+      font-weight: 720;
+      font-variant-numeric: tabular-nums;
+    }
+    #${HOST_ID} .vidmark-study-item strong,
+    #${HOST_ID} .vidmark-quote strong {
+      color: var(--vidmark-ink);
+      font-weight: 720;
+      line-height: 1.45;
+    }
+    #${HOST_ID} .vidmark-study-item p,
+    #${HOST_ID} .vidmark-quote p {
+      margin: 0;
+      color: #334155;
+      line-height: 1.5;
+    }
+    #${HOST_ID} .vidmark-study-item em,
+    #${HOST_ID} .vidmark-quote em {
+      color: var(--vidmark-muted);
+      font-style: normal;
+      line-height: 1.45;
+    }
+    #${HOST_ID} .vidmark-study-bullets {
+      display: grid;
+      gap: 6px;
+      margin: 0;
+      padding-left: 18px;
+      color: var(--vidmark-ink);
+    }
+    #${HOST_ID} .vidmark-question {
+      color: var(--vidmark-ink);
+      font-weight: 650;
+      line-height: 1.45;
+    }
+    #${HOST_ID} .vidmark-glossary {
+      display: grid;
+      gap: 7px;
+      margin: 0;
+    }
+    #${HOST_ID} .vidmark-glossary div {
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 9px 10px;
+    }
+    #${HOST_ID} .vidmark-glossary dt {
+      color: var(--vidmark-ink);
+      font-weight: 720;
+    }
+    #${HOST_ID} .vidmark-glossary dd {
+      margin: 3px 0 0;
+      color: var(--vidmark-muted);
+      line-height: 1.45;
     }
     #${HOST_ID} .vidmark-clips {
       display: grid;
@@ -461,7 +600,7 @@ async function enrichVidMarkReading(
   host: HTMLElement,
   video: VidMarkVideoMetadata,
   cues: VidMarkTranscriptCue[],
-  mount: (cues: VidMarkTranscriptCue[], clips?: VidMarkClip[]) => void,
+  mount: (cues: VidMarkTranscriptCue[], clips?: VidMarkClip[], guide?: VidMarkStudyGuide) => void,
 ): Promise<void> {
   try {
     const settings = await loadSettings();
@@ -478,6 +617,13 @@ async function enrichVidMarkReading(
     });
     if (!host.isConnected) return;
     mount(translated.cues, highlights.clips);
+    const studyGuide = await generateVidMarkStudyGuide(settings, {
+      video,
+      cues: translated.cues,
+      clips: highlights.clips,
+    });
+    if (!host.isConnected) return;
+    mount(translated.cues, highlights.clips, studyGuide.guide);
   } catch {
     return;
   }

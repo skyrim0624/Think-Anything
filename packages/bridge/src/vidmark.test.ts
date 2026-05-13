@@ -3,8 +3,10 @@ import test from "node:test";
 import {
   buildVidMarkCardMarkdown,
   buildVidMarkHighlightsPrompt,
+  buildVidMarkStudyGuidePrompt,
   buildVidMarkTranslatePrompt,
   parseVidMarkHighlightsOutput,
+  parseVidMarkStudyGuideOutput,
   parseVidMarkTranslateOutput,
 } from "./vidmark.js";
 
@@ -31,6 +33,8 @@ test("buildVidMarkTranslatePrompt includes video title and timestamped cues", ()
   assert.match(prompt, /cue-0001/);
   assert.match(prompt, /00:01/);
   assert.match(prompt, /hello world/);
+  assert.match(prompt, /时间切片/);
+  assert.match(prompt, /先通读全部字幕/);
 });
 
 test("parseVidMarkTranslateOutput merges translated text by cue id", () => {
@@ -110,6 +114,56 @@ test("parseVidMarkHighlightsOutput ignores clips without matching cues", () => {
   assert.deepEqual(response.clips, []);
 });
 
+test("buildVidMarkStudyGuidePrompt asks for a learning workspace, not only clips", () => {
+  const prompt = buildVidMarkStudyGuidePrompt({
+    video: request.video,
+    cues: request.cues,
+    clips: [
+      {
+        id: "clip-1",
+        title: "Key idea",
+        type: "insight",
+        summary: "The key idea appears here.",
+        startMs: 1000,
+        endMs: 4600,
+        cueIds: ["cue-0001", "cue-0002"],
+      },
+    ],
+  });
+
+  assert.match(prompt, /学习导演/);
+  assert.match(prompt, /quickPreview/);
+  assert.match(prompt, /suggestedQuestions/);
+  assert.match(prompt, /memorableQuotes/);
+  assert.match(prompt, /glossary/);
+});
+
+test("parseVidMarkStudyGuideOutput keeps usable learning guide fields", () => {
+  const response = parseVidMarkStudyGuideOutput(
+    JSON.stringify({
+      guide: {
+        quickPreview: "这段视频解释了一个关键判断。",
+        learningPath: [
+          { clipId: "clip-1", why: "先看这里建立主线。", question: "这个判断成立的前提是什么？" },
+        ],
+        keyTakeaways: ["把问题转成可验证假设。"],
+        suggestedQuestions: [{ id: "q1", question: "我如何把它用到自己的项目？", cueIds: ["cue-0001"] }],
+        memorableQuotes: [
+          { id: "quote-1", text: "this is important", translatedText: "这很重要", reason: "可作为复述入口。", cueId: "cue-0002" },
+        ],
+        glossary: [{ term: "hypothesis", explanation: "可被验证或推翻的判断。" }],
+      },
+    }),
+    request.cues,
+  );
+
+  assert.equal(response.guide.quickPreview, "这段视频解释了一个关键判断。");
+  assert.equal(response.guide.learningPath[0]?.clipId, "clip-1");
+  assert.equal(response.guide.suggestedQuestions[0]?.cueIds?.[0], "cue-0001");
+  assert.equal(response.guide.memorableQuotes[0]?.cueId, "cue-0002");
+  assert.equal(response.guide.glossary[0]?.term, "hypothesis");
+});
+
 test("buildVidMarkCardMarkdown includes source, clips, bilingual excerpts, and notes", () => {
   const markdown = buildVidMarkCardMarkdown({
     video: request.video,
@@ -141,6 +195,14 @@ test("buildVidMarkCardMarkdown includes source, clips, bilingual excerpts, and n
         createdAt: "2026-05-13T01:00:00.000Z",
       },
     ],
+    guide: {
+      quickPreview: "这段视频解释了一个关键判断。",
+      learningPath: [{ clipId: "clip-1", why: "先看这里建立主线。", question: "这个判断成立的前提是什么？" }],
+      keyTakeaways: ["把问题转成可验证假设。"],
+      suggestedQuestions: [{ id: "q1", question: "我如何把它用到自己的项目？", cueIds: ["cue-0001"] }],
+      memorableQuotes: [{ id: "quote-1", text: "hello world", translatedText: "你好，世界", reason: "可作为复述入口。", cueId: "cue-0001" }],
+      glossary: [{ term: "hypothesis", explanation: "可被验证或推翻的判断。" }],
+    },
   });
 
   assert.match(markdown, /type: vidmark-video/);
@@ -150,4 +212,6 @@ test("buildVidMarkCardMarkdown includes source, clips, bilingual excerpts, and n
   assert.match(markdown, /hello world/);
   assert.match(markdown, /你好，世界/);
   assert.match(markdown, /这句适合做开头。/);
+  assert.match(markdown, /## 学习导览/);
+  assert.match(markdown, /这段视频解释了一个关键判断。/);
 });
