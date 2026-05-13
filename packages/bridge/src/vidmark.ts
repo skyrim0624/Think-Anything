@@ -3,11 +3,13 @@ import type {
   VidMarkClipType,
   VidMarkHighlightsRequest,
   VidMarkHighlightsResponse,
+  VidMarkSaveCardRequest,
   VidMarkTranslateRequest,
   VidMarkTranslateResponse,
   VidMarkTranscriptCue,
 } from "@twyr/shared";
 import { formatVidMarkTimestamp, normalizeVidMarkClip } from "@twyr/shared";
+import { yamlList, yamlString } from "./markdown.js";
 
 interface TranslationItem {
   id: string;
@@ -151,6 +153,40 @@ export function parseVidMarkHighlightsOutput(
   };
 }
 
+export function buildVidMarkCardMarkdown(request: VidMarkSaveCardRequest): string {
+  return [
+    "---",
+    "type: vidmark-video",
+    `sourceUrl: ${yamlString(request.video.canonicalUrl)}`,
+    `sourceTitle: ${yamlString(request.video.title)}`,
+    `platform: ${yamlString(request.video.platform)}`,
+    `videoId: ${yamlString(request.video.videoId)}`,
+    `capturedAt: ${yamlString(new Date().toISOString())}`,
+    `tags: ${yamlList(["vidmark", "video"])}`,
+    "---",
+    "",
+    `# ${request.video.title}`,
+    "",
+    `来源：${request.video.canonicalUrl}`,
+    request.video.author ? `作者：${request.video.author}` : "",
+    "",
+    "## 高能片段",
+    "",
+    formatClips(request),
+    "",
+    "## 双语摘录",
+    "",
+    formatCues(request.cues),
+    "",
+    "## 我的笔记",
+    "",
+    formatNotes(request.notes),
+    "",
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n");
+}
+
 function readTranslations(value: unknown): TranslationItem[] {
   if (!value || typeof value !== "object") {
     throw new Error("VidMark 翻译输出缺少 translations。");
@@ -200,6 +236,58 @@ function readClips(value: unknown): VidMarkClip[] {
       };
     })
     .filter((item): item is VidMarkClip => Boolean(item));
+}
+
+function formatClips(request: VidMarkSaveCardRequest): string {
+  if (!request.clips.length) return "暂无高能片段。";
+  return request.clips
+    .map((clip) => {
+      const url = `${request.video.canonicalUrl}&t=${Math.floor(clip.startMs / 1000)}s`;
+      return [
+        `### ${clip.title}`,
+        "",
+        `- 类型：${clip.type}`,
+        `- 时间：${formatVidMarkTimestamp(clip.startMs)}-${formatVidMarkTimestamp(clip.endMs)}`,
+        `- 跳转：${url}`,
+        `- 摘要：${clip.summary}`,
+      ].join("\n");
+    })
+    .join("\n\n");
+}
+
+function formatCues(cues: VidMarkTranscriptCue[]): string {
+  if (!cues.length) return "暂无字幕摘录。";
+  return cues
+    .map((cue) => {
+      return [
+        `### ${formatVidMarkTimestamp(cue.startMs)}`,
+        "",
+        cue.text,
+        "",
+        cue.translatedText ? `> ${cue.translatedText}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n");
+}
+
+function formatNotes(notes: VidMarkSaveCardRequest["notes"]): string {
+  if (!notes.length) return "暂无手写笔记。";
+  return notes
+    .map((note) => {
+      return [
+        `### ${formatVidMarkTimestamp(note.videoTimeMs)}`,
+        "",
+        note.originalText ? `原文：${note.originalText}` : "",
+        note.translatedText ? `译文：${note.translatedText}` : "",
+        "",
+        note.note,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n");
 }
 
 function clipTypeValue(value: unknown): VidMarkClipType | undefined {

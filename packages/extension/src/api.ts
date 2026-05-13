@@ -12,6 +12,8 @@ import {
   type PromoteSourceResponse,
   type RetrieveRequest,
   type RetrieveResponse,
+  type VidMarkSaveCardRequest,
+  type VidMarkSaveCardResponse,
   type VidMarkTranslateRequest,
   type VidMarkTranslateResponse,
   isApiErrorResponse,
@@ -77,6 +79,13 @@ export async function translateVidMarkTranscript(
   body: VidMarkTranslateRequest,
 ): Promise<VidMarkTranslateResponse> {
   return request<VidMarkTranslateResponse>(settings, "/api/vidmark/translate", "POST", body);
+}
+
+export async function saveVidMarkCard(
+  settings: ExtensionSettings,
+  body: VidMarkSaveCardRequest,
+): Promise<VidMarkSaveCardResponse> {
+  return request<VidMarkSaveCardResponse>(settings, "/api/vidmark/save-card", "POST", body);
 }
 
 async function request<T>(

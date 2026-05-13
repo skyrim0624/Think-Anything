@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildVidMarkCardMarkdown,
   buildVidMarkHighlightsPrompt,
   buildVidMarkTranslatePrompt,
   parseVidMarkHighlightsOutput,
@@ -107,4 +108,46 @@ test("parseVidMarkHighlightsOutput ignores clips without matching cues", () => {
   );
 
   assert.deepEqual(response.clips, []);
+});
+
+test("buildVidMarkCardMarkdown includes source, clips, bilingual excerpts, and notes", () => {
+  const markdown = buildVidMarkCardMarkdown({
+    video: request.video,
+    cues: [
+      {
+        ...request.cues[0]!,
+        translatedText: "你好，世界",
+      },
+    ],
+    clips: [
+      {
+        id: "clip-1",
+        title: "Key idea",
+        type: "insight",
+        summary: "The key idea appears here.",
+        startMs: 1000,
+        endMs: 2400,
+        cueIds: ["cue-0001"],
+      },
+    ],
+    notes: [
+      {
+        id: "note-1",
+        cueId: "cue-0001",
+        videoTimeMs: 1000,
+        originalText: "hello world",
+        translatedText: "你好，世界",
+        note: "这句适合做开头。",
+        createdAt: "2026-05-13T01:00:00.000Z",
+      },
+    ],
+  });
+
+  assert.match(markdown, /type: vidmark-video/);
+  assert.match(markdown, /sourceUrl: "https:\/\/www\.youtube\.com\/watch\?v=abc123XYZ"/);
+  assert.match(markdown, /## 高能片段/);
+  assert.match(markdown, /Key idea/);
+  assert.match(markdown, /hello world/);
+  assert.match(markdown, /你好，世界/);
+  assert.match(markdown, /这句适合做开头。/);
 });

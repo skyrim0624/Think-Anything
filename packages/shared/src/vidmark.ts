@@ -65,6 +65,18 @@ export interface VidMarkHighlightsResponse {
   clips: VidMarkClip[];
 }
 
+export interface VidMarkSaveCardRequest {
+  video: VidMarkVideoMetadata;
+  cues: VidMarkTranscriptCue[];
+  clips: VidMarkClip[];
+  notes: VidMarkNote[];
+}
+
+export interface VidMarkSaveCardResponse {
+  path: string;
+  indexPath: string;
+}
+
 export function sortVidMarkCues(cues: VidMarkTranscriptCue[]): VidMarkTranscriptCue[] {
   return [...cues].sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs);
 }

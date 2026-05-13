@@ -17,6 +17,7 @@ import type {
   FeedbackRequest,
   PromoteSourceRequest,
   RetrieveRequest,
+  VidMarkSaveCardRequest,
   VidMarkTranslateRequest,
 } from "@twyr/shared";
 import { DEFAULT_CODEX_MODEL, type TwyrModelReasoningEffort } from "@twyr/shared";
@@ -56,6 +57,12 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "POST" && url.pathname === "/api/vidmark/translate") {
       await handleVidMarkTranslate(request, response);
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/vidmark/save-card") {
+      const body = await readJson<VidMarkSaveCardRequest>(request);
+      const result = vault.writeVidMarkCard(body);
+      sendJson(response, 200, result);
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/capture") {
