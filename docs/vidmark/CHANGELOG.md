@@ -58,3 +58,9 @@
 - [进展]: 新增视频卡 Markdown 生成逻辑，包含来源、高能片段、双语摘录和用户笔记。
 - [进展]: Vault 新增 `50-VIDMARK/` 目录结构和视频索引。
 - [进展]: Bridge 和扩展 API 已接入 `/api/vidmark/save-card`。
+
+## [2026-05-13] YouTube 字幕接入阅读器
+
+- [进展]: 新增从 YouTube 页面脚本提取 `ytInitialPlayerResponse` 的能力。
+- [进展]: VidMark 入口打开后会尝试读取 YouTube caption track，并把字幕句注入阅读器。
+- [进展]: 阅读器会在字幕异步加载后保留当前状态并刷新字幕列表。

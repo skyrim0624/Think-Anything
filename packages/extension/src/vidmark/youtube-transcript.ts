@@ -7,6 +7,20 @@ export interface YouTubeCaptionTrack {
   kind: VidMarkTranscriptSource;
 }
 
+export function extractYouTubePlayerResponseFromScriptText(text: string): unknown | undefined {
+  const markerIndex = text.indexOf("ytInitialPlayerResponse");
+  if (markerIndex < 0) return undefined;
+  const jsonStart = text.indexOf("{", markerIndex);
+  if (jsonStart < 0) return undefined;
+  const jsonText = extractBalancedJson(text, jsonStart);
+  if (!jsonText) return undefined;
+  try {
+    return JSON.parse(jsonText);
+  } catch {
+    return undefined;
+  }
+}
+
 export function extractCaptionTracksFromPlayerResponse(value: unknown): YouTubeCaptionTrack[] {
   const root = asRecord(value);
   const captions = asRecord(root?.captions);
@@ -99,4 +113,40 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function extractBalancedJson(text: string, startIndex: number): string | undefined {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = startIndex; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return text.slice(startIndex, index + 1);
+    }
+  }
+  return undefined;
 }

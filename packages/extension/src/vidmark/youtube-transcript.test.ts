@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractCaptionTracksFromPlayerResponse, parseYouTubeTimedText } from "./youtube-transcript.js";
+import {
+  extractCaptionTracksFromPlayerResponse,
+  extractYouTubePlayerResponseFromScriptText,
+  parseYouTubeTimedText,
+} from "./youtube-transcript.js";
 
 test("extractCaptionTracksFromPlayerResponse reads caption track metadata", () => {
   const response = {
@@ -38,4 +42,12 @@ test("parseYouTubeTimedText converts XML text nodes into transcript cues", () =>
   assert.equal(cues[0]?.text, "hello & world");
   assert.equal(cues[0]?.language, "en");
   assert.equal(cues[0]?.source, "official");
+});
+
+test("extractYouTubePlayerResponseFromScriptText parses balanced player response JSON", () => {
+  const response = extractYouTubePlayerResponseFromScriptText(
+    'window.ytInitialPlayerResponse = {"videoDetails":{"title":"Demo"},"captions":{"x":"brace } in string"}}; var x = 1;',
+  ) as { videoDetails?: { title?: string } };
+
+  assert.equal(response.videoDetails?.title, "Demo");
 });

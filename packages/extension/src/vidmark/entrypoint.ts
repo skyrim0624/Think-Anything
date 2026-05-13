@@ -1,5 +1,12 @@
+import type { VidMarkTranscriptCue } from "@twyr/shared";
 import { detectVidMarkVideoPage } from "./video-page.js";
 import { mountVidMarkReader } from "./reader.js";
+import {
+  extractCaptionTracksFromPlayerResponse,
+  extractYouTubePlayerResponseFromScriptText,
+  parseYouTubeTimedText,
+  type YouTubeCaptionTrack,
+} from "./youtube-transcript.js";
 
 const HOST_ID = "twyr-vidmark-host";
 const STYLE_ID = "twyr-vidmark-style";
@@ -28,6 +35,15 @@ export function openVidMarkEntrypoint(): VidMarkEntrypointResult {
     video: metadata,
     onClose: () => host.remove(),
     onSeek: seekVideo,
+  });
+  void loadYouTubeTranscript().then((cues) => {
+    if (!host.isConnected || !cues.length) return;
+    mountVidMarkReader(host, {
+      video: metadata,
+      cues,
+      onClose: () => host.remove(),
+      onSeek: seekVideo,
+    });
   });
   return { ok: true };
 }
@@ -240,4 +256,41 @@ function seekVideo(timeMs: number): void {
   if (!(video instanceof HTMLVideoElement)) return;
   video.currentTime = timeMs / 1000;
   void video.play();
+}
+
+async function loadYouTubeTranscript(): Promise<VidMarkTranscriptCue[]> {
+  const response = findYouTubePlayerResponse();
+  const tracks = extractCaptionTracksFromPlayerResponse(response);
+  const track = chooseCaptionTrack(tracks);
+  if (!track) return [];
+  const transcriptUrl = withTimedTextXmlFormat(track.url);
+  const transcript = await fetch(transcriptUrl).then((fetchResponse) => (fetchResponse.ok ? fetchResponse.text() : ""));
+  if (!transcript.trim()) return [];
+  return parseYouTubeTimedText(transcript, track.language, track.kind);
+}
+
+function findYouTubePlayerResponse(): unknown | undefined {
+  for (const script of Array.from(document.scripts)) {
+    const response = extractYouTubePlayerResponseFromScriptText(script.textContent ?? "");
+    if (response) return response;
+  }
+  return undefined;
+}
+
+function chooseCaptionTrack(tracks: YouTubeCaptionTrack[]): YouTubeCaptionTrack | undefined {
+  return (
+    tracks.find((track) => track.language.startsWith("en") && track.kind === "official") ??
+    tracks.find((track) => track.language.startsWith("en")) ??
+    tracks[0]
+  );
+}
+
+function withTimedTextXmlFormat(value: string): string {
+  try {
+    const url = new URL(value);
+    url.searchParams.set("fmt", "srv3");
+    return url.href;
+  } catch {
+    return value;
+  }
 }

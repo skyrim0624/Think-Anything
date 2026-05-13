@@ -5,7 +5,7 @@ import {
   type VidMarkVideoMetadata,
 } from "@twyr/shared";
 import { createRoot, type Root } from "react-dom/client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   addVidMarkNote,
   createVidMarkReaderState,
@@ -46,6 +46,13 @@ export function mountVidMarkReader(host: HTMLElement, options: MountVidMarkReade
 function VidMarkReader(props: Required<Pick<MountVidMarkReaderOptions, "video" | "cues" | "onClose">> & Pick<MountVidMarkReaderOptions, "onSeek">) {
   const [state, setState] = useState(() => createVidMarkReaderState({ video: props.video, cues: props.cues }));
   const [noteDraft, setNoteDraft] = useState("");
+  useEffect(() => {
+    setState((current) => ({
+      ...current,
+      video: props.video,
+      cues: props.cues,
+    }));
+  }, [props.video, props.cues]);
   const selectedCue = useMemo(
     () => state.cues.find((cue) => cue.id === state.selectedCueId),
     [state.cues, state.selectedCueId],
