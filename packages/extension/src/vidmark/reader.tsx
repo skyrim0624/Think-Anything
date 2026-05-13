@@ -5,8 +5,9 @@ import {
   type VidMarkTranscriptCue,
   type VidMarkVideoMetadata,
 } from "@twyr/shared";
+import { ExternalLink, FileText, PenLine, Save, Star, X } from "lucide-react";
 import { createRoot, type Root } from "react-dom/client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   addVidMarkNote,
   createVidMarkReaderState,
@@ -54,7 +55,8 @@ function VidMarkReader(
 ) {
   const [state, setState] = useState(() => createVidMarkReaderState({ video: props.video, cues: props.cues, clips: props.clips }));
   const [noteDraft, setNoteDraft] = useState("");
-  const [saveStatus, setSaveStatus] = useState("");
+  const [saveStatus, setSaveStatus] = useState<{ tone: "saving" | "success" | "error"; text: string }>();
+  const isSaving = saveStatus?.tone === "saving";
   useEffect(() => {
     setState((current) => ({
       ...current,
@@ -87,7 +89,7 @@ function VidMarkReader(
 
   async function saveCard(): Promise<void> {
     if (!props.onSave) return;
-    setSaveStatus("保存中");
+    setSaveStatus({ tone: "saving", text: "保存中" });
     try {
       await props.onSave({
         video: state.video,
@@ -95,9 +97,9 @@ function VidMarkReader(
         clips: state.clips,
         notes: state.notes,
       });
-      setSaveStatus("已保存");
+      setSaveStatus({ tone: "success", text: "已保存" });
     } catch {
-      setSaveStatus("保存失败");
+      setSaveStatus({ tone: "error", text: "保存失败" });
     }
   }
 
@@ -107,29 +109,35 @@ function VidMarkReader(
         <div className="vidmark-reader-heading">
           <span className="vidmark-reader-brand">VidMark</span>
           <h2>{state.video.title}</h2>
-          <a href={state.video.canonicalUrl} target="_blank" rel="noreferrer">
-            {state.video.canonicalUrl}
+          <a className="vidmark-source-link" href={state.video.canonicalUrl} target="_blank" rel="noreferrer">
+            <ExternalLink size={13} aria-hidden="true" />
+            {formatSourceLabel(state.video.canonicalUrl)}
           </a>
         </div>
         <div className="vidmark-header-actions">
-          <button className="vidmark-save-button" type="button" onClick={() => void saveCard()} disabled={!props.onSave}>
+          <button className="vidmark-save-button" type="button" onClick={() => void saveCard()} disabled={!props.onSave || isSaving}>
+            <Save size={15} aria-hidden="true" />
             保存
           </button>
           <button className="vidmark-icon-button" type="button" onClick={props.onClose} aria-label="关闭 VidMark">
-            ×
+            <X size={17} aria-hidden="true" />
           </button>
         </div>
       </header>
-      {saveStatus ? <div className="vidmark-save-status">{saveStatus}</div> : null}
+      {saveStatus ? (
+        <div className="vidmark-save-status" data-tone={saveStatus.tone} role="status" aria-live="polite">
+          {saveStatus.text}
+        </div>
+      ) : null}
 
       <nav className="vidmark-tabs" aria-label="VidMark 视图">
-        <TabButton active={state.activeTab === "transcript"} onClick={() => openTab("transcript")}>
+        <TabButton active={state.activeTab === "transcript"} icon={<FileText size={15} aria-hidden="true" />} onClick={() => openTab("transcript")}>
           字幕
         </TabButton>
-        <TabButton active={state.activeTab === "clips"} onClick={() => openTab("clips")}>
+        <TabButton active={state.activeTab === "clips"} icon={<Star size={15} aria-hidden="true" />} onClick={() => openTab("clips")}>
           高能
         </TabButton>
-        <TabButton active={state.activeTab === "notes"} onClick={() => openTab("notes")}>
+        <TabButton active={state.activeTab === "notes"} icon={<PenLine size={15} aria-hidden="true" />} onClick={() => openTab("notes")}>
           笔记
         </TabButton>
       </nav>
@@ -153,9 +161,10 @@ function VidMarkReader(
   );
 }
 
-function TabButton(props: { active: boolean; children: string; onClick: () => void }) {
+function TabButton(props: { active: boolean; children: string; icon: ReactNode; onClick: () => void }) {
   return (
     <button className={props.active ? "vidmark-tab vidmark-tab-active" : "vidmark-tab"} type="button" onClick={props.onClick}>
+      {props.icon}
       {props.children}
     </button>
   );
@@ -166,7 +175,7 @@ function TranscriptView(props: {
   selectedCueId?: string;
   onSelect: (cueId: string) => void;
 }) {
-  if (!props.cues.length) return <EmptyState text="已识别视频，字幕将在下一步接入。" />;
+  if (!props.cues.length) return <EmptyState text="正在读取字幕；如果视频没有公开字幕，会停留在这里。" />;
   return (
     <ol className="vidmark-transcript">
       {props.cues.map((cue) => (
@@ -177,8 +186,8 @@ function TranscriptView(props: {
             onClick={() => props.onSelect(cue.id)}
           >
             <span>{formatVidMarkTimestamp(cue.startMs)}</span>
-            <strong>{cue.text}</strong>
-            {cue.translatedText ? <em>{cue.translatedText}</em> : null}
+            <strong>{cue.translatedText ?? cue.text}</strong>
+            {cue.translatedText ? <em>{cue.text}</em> : null}
           </button>
         </li>
       ))}
@@ -225,12 +234,18 @@ function NotesView(props: {
           <span>未选择字幕句</span>
         )}
       </div>
-      <textarea
-        value={props.noteDraft}
-        onChange={(event) => props.onChange(event.currentTarget.value)}
-        placeholder="写下这段为什么重要"
-      />
+      <label className="vidmark-note-field" htmlFor="vidmark-note-draft">
+        <span className="vidmark-field-label">笔记</span>
+        <textarea
+          id="vidmark-note-draft"
+          value={props.noteDraft}
+          onChange={(event) => props.onChange(event.currentTarget.value)}
+          placeholder="写下这段为什么重要"
+          aria-label="VidMark 笔记内容"
+        />
+      </label>
       <button className="vidmark-primary-button" type="button" onClick={props.onSave} disabled={!props.noteDraft.trim()}>
+        <PenLine size={15} aria-hidden="true" />
         保存笔记
       </button>
       <div className="vidmark-note-list">
@@ -247,4 +262,14 @@ function NotesView(props: {
 
 function EmptyState(props: { text: string }) {
   return <div className="vidmark-empty">{props.text}</div>;
+}
+
+function formatSourceLabel(value: string): string {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.replace(/^www\./, "");
+    return `${hostname}${url.pathname}`;
+  } catch {
+    return value;
+  }
 }

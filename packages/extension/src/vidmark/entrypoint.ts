@@ -27,7 +27,7 @@ export function openVidMarkEntrypoint(): VidMarkEntrypointResult {
 
   const host = ensureHost();
   if (!metadata) {
-    host.textContent = "VidMark 当前只支持 YouTube 视频页。";
+    host.replaceChildren(createHostMessage("VidMark 当前只支持 YouTube 视频页。"));
     return { ok: false, reason: "unsupported-page" };
   }
 
@@ -62,21 +62,15 @@ function ensureHost(): HTMLElement {
 
   const host = document.createElement("section");
   host.id = HOST_ID;
-  host.style.position = "fixed";
-  host.style.inset = "80px 24px auto auto";
-  host.style.zIndex = "2147483647";
-  host.style.width = "360px";
-  host.style.maxWidth = "calc(100vw - 48px)";
-  host.style.padding = "14px";
-  host.style.border = "1px solid rgba(15, 118, 110, 0.25)";
-  host.style.borderRadius = "10px";
-  host.style.background = "#ffffff";
-  host.style.color = "#111827";
-  host.style.boxShadow = "0 18px 44px rgba(17, 24, 39, 0.18)";
-  host.style.font = '13px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-  host.style.wordBreak = "break-word";
   document.documentElement.append(host);
   return host;
+}
+
+function createHostMessage(text: string): HTMLElement {
+  const message = document.createElement("div");
+  message.className = "vidmark-empty vidmark-host-message";
+  message.textContent = text;
+  return message;
 }
 
 function ensureStyle(): void {
@@ -84,6 +78,40 @@ function ensureStyle(): void {
   const style = document.createElement("style");
   style.id = STYLE_ID;
   style.textContent = `
+    #${HOST_ID} {
+      --vidmark-ink: #0f172a;
+      --vidmark-muted: #64748b;
+      --vidmark-soft: #f8fafc;
+      --vidmark-softer: #fbfdff;
+      --vidmark-line: rgba(15, 23, 42, 0.1);
+      --vidmark-line-strong: rgba(15, 23, 42, 0.18);
+      --vidmark-accent: #0d9488;
+      --vidmark-accent-strong: #0f766e;
+      --vidmark-accent-soft: #ecfdf5;
+      position: fixed;
+      top: 72px;
+      right: 24px;
+      z-index: 2147483647;
+      width: min(420px, calc(100vw - 32px));
+      max-height: min(720px, calc(100dvh - 96px));
+      overflow: hidden;
+      box-sizing: border-box;
+      border: 1px solid var(--vidmark-line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.98);
+      color: var(--vidmark-ink);
+      box-shadow: 0 24px 70px rgba(15, 23, 42, 0.12), 0 1px 2px rgba(15, 23, 42, 0.06);
+      font: 14px/1.55 "Plus Jakarta Sans", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      word-break: break-word;
+      color-scheme: light;
+      isolation: isolate;
+      backdrop-filter: saturate(160%) blur(18px);
+      -webkit-backdrop-filter: saturate(160%) blur(18px);
+    }
+    #${HOST_ID},
+    #${HOST_ID} * {
+      box-sizing: border-box;
+    }
     #${HOST_ID} .vidmark-shell {
       display: grid;
       gap: 10px;
@@ -94,179 +122,323 @@ function ensureStyle(): void {
     #${HOST_ID} .vidmark-notes,
     #${HOST_ID} .vidmark-note-list {
       display: grid;
-      gap: 10px;
+      gap: 12px;
+    }
+    #${HOST_ID} .vidmark-reader {
+      min-height: 0;
+      padding: 14px;
     }
     #${HOST_ID} .vidmark-reader-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: start;
+      gap: 12px;
+    }
+    #${HOST_ID} .vidmark-reader-heading {
+      min-width: 0;
+      gap: 6px;
     }
     #${HOST_ID} .vidmark-header-actions {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
     #${HOST_ID} .vidmark-reader-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
       width: fit-content;
-      border: 1px solid rgba(15, 118, 110, 0.18);
-      border-radius: 999px;
-      padding: 2px 7px;
-      background: #ccfbf1;
-      color: #134e4a;
-      font-size: 11px;
+      color: var(--vidmark-accent-strong);
+      font-size: 12px;
       font-weight: 760;
+    }
+    #${HOST_ID} .vidmark-reader-brand::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--vidmark-accent);
+      box-shadow: 0 0 0 4px rgba(13, 148, 136, 0.12);
     }
     #${HOST_ID} h2 {
       margin: 0;
-      color: #111827;
+      color: var(--vidmark-ink);
       font-size: 15px;
-      line-height: 1.35;
+      line-height: 1.42;
+      font-weight: 720;
+      letter-spacing: 0;
+      display: -webkit-box;
+      overflow: hidden;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
     }
-    #${HOST_ID} a {
-      color: #0f766e;
+    #${HOST_ID} .vidmark-source-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+      width: fit-content;
+      max-width: 100%;
+      color: var(--vidmark-muted);
       font-size: 12px;
+      line-height: 1.3;
       text-decoration: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      transition: color 160ms ease;
+    }
+    #${HOST_ID} .vidmark-source-link svg,
+    #${HOST_ID} button svg {
+      flex: 0 0 auto;
+    }
+    #${HOST_ID} .vidmark-source-link:hover {
+      color: var(--vidmark-accent-strong);
     }
     #${HOST_ID} .vidmark-icon-button,
-    #${HOST_ID} .vidmark-save-button {
-      width: 28px;
-      height: 28px;
-      border: 1px solid rgba(17, 24, 39, 0.12);
+    #${HOST_ID} .vidmark-save-button,
+    #${HOST_ID} .vidmark-tab,
+    #${HOST_ID} .vidmark-primary-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 44px;
+      border: 1px solid var(--vidmark-line);
       border-radius: 8px;
       background: #ffffff;
-      color: #111827;
+      color: var(--vidmark-ink);
       cursor: pointer;
       font: inherit;
+      transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+    }
+    #${HOST_ID} .vidmark-icon-button:hover,
+    #${HOST_ID} .vidmark-tab:hover,
+    #${HOST_ID} .vidmark-cue:hover,
+    #${HOST_ID} .vidmark-clip:hover {
+      border-color: var(--vidmark-line-strong);
+      background: var(--vidmark-softer);
+    }
+    #${HOST_ID} .vidmark-icon-button:focus-visible,
+    #${HOST_ID} .vidmark-save-button:focus-visible,
+    #${HOST_ID} .vidmark-tab:focus-visible,
+    #${HOST_ID} .vidmark-primary-button:focus-visible,
+    #${HOST_ID} .vidmark-cue:focus-visible,
+    #${HOST_ID} .vidmark-clip:focus-visible,
+    #${HOST_ID} textarea:focus-visible,
+    #${HOST_ID} .vidmark-source-link:focus-visible {
+      outline: none;
+      border-color: var(--vidmark-accent);
+      box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.16);
+    }
+    #${HOST_ID} .vidmark-source-link:focus-visible {
+      border-radius: 6px;
+    }
+    #${HOST_ID} .vidmark-icon-button {
+      width: 44px;
+      padding: 0;
+      color: var(--vidmark-muted);
     }
     #${HOST_ID} .vidmark-save-button {
       width: auto;
-      min-width: 44px;
-      padding: 0 8px;
-      color: #0f766e;
+      min-width: 82px;
+      padding: 0 12px;
+      border-color: var(--vidmark-accent);
+      background: var(--vidmark-accent);
+      color: #ffffff;
       font-weight: 680;
+    }
+    #${HOST_ID} .vidmark-save-button:hover {
+      border-color: var(--vidmark-accent-strong);
+      background: var(--vidmark-accent-strong);
+    }
+    #${HOST_ID} .vidmark-save-button:disabled,
+    #${HOST_ID} .vidmark-primary-button:disabled {
+      cursor: not-allowed;
+      opacity: 0.52;
     }
     #${HOST_ID} .vidmark-save-status {
       border-radius: 8px;
-      background: #f0fdfa;
-      color: #0f766e;
-      padding: 6px 8px;
+      border: 1px solid rgba(13, 148, 136, 0.16);
+      background: var(--vidmark-accent-soft);
+      color: var(--vidmark-accent-strong);
+      padding: 8px 10px;
       font-size: 12px;
+      font-weight: 620;
+    }
+    #${HOST_ID} .vidmark-save-status[data-tone="error"] {
+      border-color: rgba(180, 35, 24, 0.18);
+      background: #fff7ed;
+      color: #b42318;
     }
     #${HOST_ID} .vidmark-tabs {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 4px;
-      border-radius: 9px;
-      background: #f2f7f6;
-      padding: 4px;
+      gap: 3px;
+      border: 1px solid var(--vidmark-line);
+      border-radius: 8px;
+      background: var(--vidmark-soft);
+      padding: 3px;
     }
-    #${HOST_ID} .vidmark-tab,
-    #${HOST_ID} .vidmark-primary-button {
-      min-height: 32px;
+    #${HOST_ID} .vidmark-tab {
       border: 1px solid transparent;
       border-radius: 7px;
       background: transparent;
-      color: #374151;
-      cursor: pointer;
-      font: inherit;
+      color: var(--vidmark-muted);
       font-size: 12px;
       font-weight: 680;
     }
     #${HOST_ID} .vidmark-tab-active,
     #${HOST_ID} .vidmark-primary-button {
-      border-color: rgba(15, 118, 110, 0.22);
+      border-color: rgba(13, 148, 136, 0.2);
       background: #ffffff;
-      color: #0f766e;
+      color: var(--vidmark-accent-strong);
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
     }
     #${HOST_ID} .vidmark-empty {
-      border: 1px dashed rgba(15, 118, 110, 0.22);
-      border-radius: 9px;
-      padding: 14px;
-      background: #f8fbfb;
-      color: #5f6b7a;
+      border: 1px dashed rgba(13, 148, 136, 0.24);
+      border-radius: 8px;
+      padding: 16px;
+      background: var(--vidmark-softer);
+      color: var(--vidmark-muted);
       font-size: 12px;
+      line-height: 1.55;
+    }
+    #${HOST_ID} .vidmark-host-message {
+      margin: 14px;
     }
     #${HOST_ID} .vidmark-transcript {
       display: grid;
-      gap: 6px;
-      max-height: 330px;
+      gap: 7px;
+      max-height: min(430px, 54dvh);
       margin: 0;
       padding: 0;
       overflow: auto;
       list-style: none;
+      scrollbar-width: thin;
     }
     #${HOST_ID} .vidmark-clips {
       display: grid;
       gap: 8px;
-      max-height: 330px;
+      max-height: min(430px, 54dvh);
       margin: 0;
       padding: 0;
       overflow: auto;
       list-style: none;
+      scrollbar-width: thin;
     }
     #${HOST_ID} .vidmark-cue,
     #${HOST_ID} .vidmark-clip {
       display: grid;
-      gap: 4px;
+      gap: 6px;
       width: 100%;
-      border: 1px solid rgba(17, 24, 39, 0.08);
+      border: 1px solid rgba(15, 23, 42, 0.08);
       border-radius: 8px;
-      padding: 8px;
+      padding: 10px;
+      min-height: 44px;
       background: #ffffff;
       text-align: left;
       cursor: pointer;
       font: inherit;
+      transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
     }
     #${HOST_ID} .vidmark-cue-active {
-      border-color: rgba(15, 118, 110, 0.32);
-      background: #f0fdfa;
+      border-color: rgba(13, 148, 136, 0.34);
+      background: var(--vidmark-accent-soft);
+      box-shadow: inset 0 0 0 1px rgba(13, 148, 136, 0.12);
     }
     #${HOST_ID} .vidmark-cue span,
     #${HOST_ID} .vidmark-clip span,
     #${HOST_ID} .vidmark-note-context span,
     #${HOST_ID} .vidmark-note-list span {
-      color: #0f766e;
+      color: var(--vidmark-accent-strong);
       font-size: 11px;
       font-weight: 720;
+      font-variant-numeric: tabular-nums;
     }
     #${HOST_ID} .vidmark-cue strong,
     #${HOST_ID} .vidmark-clip strong,
     #${HOST_ID} .vidmark-note-context strong {
-      color: #111827;
+      color: var(--vidmark-ink);
       font-weight: 680;
+      line-height: 1.45;
     }
     #${HOST_ID} .vidmark-cue em,
     #${HOST_ID} .vidmark-clip em {
-      color: #5f6b7a;
+      color: var(--vidmark-muted);
       font-style: normal;
+      line-height: 1.45;
     }
     #${HOST_ID} .vidmark-clip p {
       margin: 2px 0 0;
-      color: #374151;
+      color: #334155;
+      line-height: 1.5;
+    }
+    #${HOST_ID} .vidmark-note-context {
+      display: grid;
+      gap: 6px;
+      border: 1px solid var(--vidmark-line);
+      border-radius: 8px;
+      background: var(--vidmark-softer);
+      padding: 10px;
+    }
+    #${HOST_ID} .vidmark-note-field {
+      display: grid;
+      gap: 6px;
+    }
+    #${HOST_ID} .vidmark-field-label {
+      color: var(--vidmark-muted);
+      font-size: 12px;
+      font-weight: 680;
     }
     #${HOST_ID} textarea {
-      min-height: 84px;
-      border: 1px solid rgba(17, 24, 39, 0.12);
-      border-radius: 9px;
-      padding: 9px;
-      color: #111827;
+      width: 100%;
+      min-height: 96px;
+      border: 1px solid var(--vidmark-line);
+      border-radius: 8px;
+      padding: 10px;
+      background: #ffffff;
+      color: var(--vidmark-ink);
       font: inherit;
       resize: vertical;
     }
-    #${HOST_ID} .vidmark-primary-button:disabled {
-      cursor: not-allowed;
-      opacity: 0.55;
+    #${HOST_ID} .vidmark-primary-button {
+      width: 100%;
+      color: var(--vidmark-accent-strong);
+      font-weight: 680;
     }
     #${HOST_ID} .vidmark-note-list article {
-      border: 1px solid rgba(17, 24, 39, 0.08);
+      border: 1px solid rgba(15, 23, 42, 0.08);
       border-radius: 8px;
-      padding: 8px;
+      padding: 10px;
       background: #ffffff;
+    }
+    #${HOST_ID} .vidmark-note-list {
+      max-height: min(260px, 34dvh);
+      overflow: auto;
+      scrollbar-width: thin;
     }
     #${HOST_ID} .vidmark-note-list p {
       margin: 3px 0 0;
-      color: #111827;
+      color: var(--vidmark-ink);
+      line-height: 1.5;
+    }
+    @media (max-width: 640px) {
+      #${HOST_ID} {
+        top: 12px;
+        right: 12px;
+        left: 12px;
+        width: auto;
+        max-height: calc(100dvh - 24px);
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #${HOST_ID} *,
+      #${HOST_ID} *::before,
+      #${HOST_ID} *::after {
+        transition-duration: 1ms !important;
+        animation-duration: 1ms !important;
+      }
     }
   `;
   document.documentElement.append(style);
