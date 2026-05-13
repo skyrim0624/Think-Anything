@@ -24,3 +24,9 @@
 - [进展]: 新增 VidMark 内容脚本入口。
 - [进展]: 支持在 YouTube 页面用 `Alt+Shift+V` 打开基础 VidMark 面板。
 - [进展]: 不支持的页面会在面板内显示明确提示。
+
+## [2026-05-13] YouTube 字幕解析
+
+- [进展]: 新增 YouTube caption track 元数据解析。
+- [进展]: 新增 timedtext XML 到 VidMark 字幕句的归一化能力。
+- [进展]: 字幕句会保留稳定 ID、起止时间、语言和来源类型。
