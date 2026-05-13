@@ -10,12 +10,9 @@ import type {
   RetrievalDecision,
   SaveRecommendation,
   TwyrCardType,
-  VidMarkSaveCardRequest,
-  VidMarkSaveCardResponse,
 } from "@twyr/shared";
 import type { BridgeConfig } from "./config.js";
 import { blockquote, localDateTime, shortHash, slugify, todayPathDate, trimText, yamlList, yamlString } from "./markdown.js";
-import { buildVidMarkCardMarkdown } from "./vidmark.js";
 
 const DIRECTORIES = [
   "00-INBOX",
@@ -24,10 +21,6 @@ const DIRECTORIES = [
   "20-CARDS",
   "30-THREADS",
   "40-MOC",
-  "50-VIDMARK",
-  "50-VIDMARK/inbox",
-  "50-VIDMARK/videos",
-  "50-VIDMARK/clips",
   "90-SYSTEM",
   "90-SYSTEM/dreams",
   "90-SYSTEM/harness",
@@ -167,28 +160,6 @@ export class VaultService {
       sourcePath,
       mocPath,
     };
-  }
-
-  writeVidMarkCard(request: VidMarkSaveCardRequest): VidMarkSaveCardResponse {
-    this.ensureStructure();
-    this.ensureVidMarkStructure();
-    const slug = slugify(request.video.title);
-    const hash = shortHash(request.video.canonicalUrl);
-    const path = this.getAvailablePath(`50-VIDMARK/videos/${todayPathDate()}-${slug}-${hash}.md`);
-    writeFileSync(join(this.config.vaultPath, path), buildVidMarkCardMarkdown(request));
-
-    const indexPath = "50-VIDMARK/index.md";
-    const indexFullPath = join(this.config.vaultPath, indexPath);
-    const entry = `- ${localDateTime()} [[${path.replace(/\.md$/, "")}|${request.video.title}]]：${request.video.canonicalUrl}\n`;
-    writeFileSync(indexFullPath, `${readFileSync(indexFullPath, "utf8").trimEnd()}\n${entry}`);
-    return { path, indexPath };
-  }
-
-  private ensureVidMarkStructure(): void {
-    mkdirSync(join(this.config.vaultPath, "50-VIDMARK", "inbox"), { recursive: true });
-    mkdirSync(join(this.config.vaultPath, "50-VIDMARK", "videos"), { recursive: true });
-    mkdirSync(join(this.config.vaultPath, "50-VIDMARK", "clips"), { recursive: true });
-    this.ensureFile("50-VIDMARK/index.md", "# VidMark 视频索引\n\n");
   }
 
   private ensureFile(relativePath: string, content: string): void {

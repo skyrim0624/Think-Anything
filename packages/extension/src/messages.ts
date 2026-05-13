@@ -30,7 +30,6 @@ export type RuntimeMessage =
   | { type: "TWYR_TOGGLE_DOCK" }
   | { type: "TWYR_ATTACH_CONTEXT" }
   | { type: "TWYR_INLINE_QUICK_SAVE" }
-  | { type: "TWYR_OPEN_VIDMARK" }
   | { type: "TWYR_CAPTURE_VISUALS"; context: ReadingContext; sourceTabId?: number }
   | { type: "TWYR_INLINE_ASK"; body: AskRequest }
   | { type: "TWYR_INLINE_CAPTURE"; body: CaptureRequest }

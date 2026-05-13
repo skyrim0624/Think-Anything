@@ -15,7 +15,6 @@ import {
   toggleInlineDock,
 } from "./inline-bubble.js";
 import type { RuntimeMessage } from "./messages.js";
-import { openVidMarkEntrypoint } from "./vidmark/entrypoint.js";
 
 const TOOLBAR_ID = "twyr-selection-toolbar";
 const INLINE_BUBBLE_HOST_ID = "twyr-inline-bubble-host";
@@ -75,10 +74,6 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
     void quickSaveInlineSelection({ captureContext: captureReadingContext, showToast }).then(() => {
       sendResponse({ ok: true });
     });
-    return true;
-  }
-  if (message.type === "TWYR_OPEN_VIDMARK") {
-    sendResponse(openVidMarkEntrypoint());
     return true;
   }
   return false;
@@ -148,13 +143,6 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     event.stopPropagation();
     void quickSaveInlineSelection({ captureContext: captureReadingContext, showToast });
-    return;
-  }
-  if (event.altKey && !event.ctrlKey && !event.metaKey && event.shiftKey && event.code === "KeyV") {
-    if (event.target instanceof Element && isEditableElement(event.target)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    openVidMarkEntrypoint();
   }
 }, true);
 

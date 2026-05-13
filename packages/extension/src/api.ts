@@ -12,14 +12,6 @@ import {
   type PromoteSourceResponse,
   type RetrieveRequest,
   type RetrieveResponse,
-  type VidMarkHighlightsRequest,
-  type VidMarkHighlightsResponse,
-  type VidMarkSaveCardRequest,
-  type VidMarkSaveCardResponse,
-  type VidMarkStudyGuideRequest,
-  type VidMarkStudyGuideResponse,
-  type VidMarkTranslateRequest,
-  type VidMarkTranslateResponse,
   isApiErrorResponse,
 } from "@twyr/shared";
 import { SETTINGS_KEY } from "./messages.js";
@@ -76,34 +68,6 @@ export async function promoteSource(
   body: PromoteSourceRequest,
 ): Promise<PromoteSourceResponse> {
   return request<PromoteSourceResponse>(settings, "/api/promote-source", "POST", body);
-}
-
-export async function translateVidMarkTranscript(
-  settings: ExtensionSettings,
-  body: VidMarkTranslateRequest,
-): Promise<VidMarkTranslateResponse> {
-  return request<VidMarkTranslateResponse>(settings, "/api/vidmark/translate", "POST", body);
-}
-
-export async function generateVidMarkHighlights(
-  settings: ExtensionSettings,
-  body: VidMarkHighlightsRequest,
-): Promise<VidMarkHighlightsResponse> {
-  return request<VidMarkHighlightsResponse>(settings, "/api/vidmark/highlights", "POST", body);
-}
-
-export async function generateVidMarkStudyGuide(
-  settings: ExtensionSettings,
-  body: VidMarkStudyGuideRequest,
-): Promise<VidMarkStudyGuideResponse> {
-  return request<VidMarkStudyGuideResponse>(settings, "/api/vidmark/study-guide", "POST", body);
-}
-
-export async function saveVidMarkCard(
-  settings: ExtensionSettings,
-  body: VidMarkSaveCardRequest,
-): Promise<VidMarkSaveCardResponse> {
-  return request<VidMarkSaveCardResponse>(settings, "/api/vidmark/save-card", "POST", body);
 }
 
 async function request<T>(

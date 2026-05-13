@@ -299,5 +299,3 @@ export function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
       typeof (value as ApiErrorResponse).error === "string",
   );
 }
-
-export * from "./vidmark.js";
