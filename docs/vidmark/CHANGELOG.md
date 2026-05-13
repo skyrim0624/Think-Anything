@@ -18,3 +18,9 @@
 
 - [进展]: 新增 YouTube watch URL 和 youtu.be 短链接识别。
 - [进展]: 输出统一 VidMark 视频元数据，为浏览器入口做准备。
+
+## [2026-05-13] VidMark 浏览器入口
+
+- [进展]: 新增 VidMark 内容脚本入口。
+- [进展]: 支持在 YouTube 页面用 `Alt+Shift+V` 打开基础 VidMark 面板。
+- [进展]: 不支持的页面会在面板内显示明确提示。
