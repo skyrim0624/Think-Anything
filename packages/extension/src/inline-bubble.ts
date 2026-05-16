@@ -34,7 +34,7 @@ import {
   type DockRequestQueueItem,
   type DockRequestQueues,
 } from "./request-queue.js";
-import { buildExtensionIconUrl, hasPointerMovedBeyondThreshold } from "./dock-interaction.js";
+import { buildExtensionIconUrl, getDockIconPresentation, hasPointerMovedBeyondThreshold } from "./dock-interaction.js";
 
 interface InlineBubbleOptions {
   captureContext: (scope?: TwyrContextScope) => ReadingContext;
@@ -1430,6 +1430,7 @@ function sanitizeContextForHistory(context: ReadingContext): ReadingContext {
 
 function buildShell(): string {
   const dockIconUrl = escapeHtml(buildExtensionIconUrl((path) => chrome.runtime.getURL(path)));
+  const dockIcon = getDockIconPresentation();
   return `
     <style>
       :host {
@@ -1481,24 +1482,26 @@ function buildShell(): string {
       }
 
       .collapsed {
-        width: 62px;
-        height: 62px;
+        width: ${dockIcon.containerSize}px;
+        height: ${dockIcon.containerSize}px;
         display: grid;
         place-items: center;
+        overflow: hidden;
+        border-radius: ${dockIcon.borderRadius}px;
       }
 
       .orb {
-        width: 46px;
-        height: 46px;
-        border: 1px solid rgba(21, 25, 34, 0.14);
-        border-radius: 50%;
-        background: var(--twyr-surface-strong);
+        width: ${dockIcon.buttonSize}px;
+        height: ${dockIcon.buttonSize}px;
+        border: 0;
+        border-radius: inherit;
+        background: transparent;
         color: var(--twyr-text);
         cursor: pointer;
         font: inherit;
         font-size: 18px;
         font-weight: 760;
-        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+        box-shadow: none;
         display: grid;
         place-items: center;
         padding: 0;
@@ -1506,10 +1509,11 @@ function buildShell(): string {
       }
 
       .orb-icon {
-        width: 30px;
-        height: 30px;
-        border-radius: 9px;
+        width: ${dockIcon.imageSize}px;
+        height: ${dockIcon.imageSize}px;
+        border-radius: inherit;
         display: block;
+        object-fit: cover;
         pointer-events: none;
       }
 
@@ -2226,8 +2230,8 @@ function buildShell(): string {
         }
 
         .orb {
-          border-color: rgba(248, 250, 252, 0.18);
-          background: #171a21;
+          border-color: transparent;
+          background: transparent;
           color: #f8fafc;
         }
       }
