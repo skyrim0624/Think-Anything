@@ -23,6 +23,12 @@
     "http://*/*",
     "https://*/*"
   ],
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/icon-48.png"],
+      "matches": ["http://*/*", "https://*/*"]
+    }
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
