@@ -34,6 +34,7 @@ import {
   type DockRequestQueueItem,
   type DockRequestQueues,
 } from "./request-queue.js";
+import { buildExtensionIconUrl, hasPointerMovedBeyondThreshold } from "./dock-interaction.js";
 
 interface InlineBubbleOptions {
   captureContext: (scope?: TwyrContextScope) => ReadingContext;
@@ -123,8 +124,10 @@ let dragState:
       startY: number;
       startLeft: number;
       startTop: number;
+      hasMoved: boolean;
     }
   | undefined;
+let suppressNextOpenClick = false;
 let pageSelectionSnapshot:
   | {
       text: string;
@@ -255,6 +258,10 @@ function bindEvents(options: InlineBubbleOptions): void {
     }
   });
   getButton("open")?.addEventListener("click", () => {
+    if (suppressNextOpenClick) {
+      suppressNextOpenClick = false;
+      return;
+    }
     rememberPageSelection();
     currentContext = options.captureContext("selection");
     setDockState("mini", options);
@@ -913,15 +920,18 @@ function startDrag(event: PointerEvent): void {
   if (!host) return;
   const target = event.currentTarget;
   if (!(target instanceof HTMLElement)) return;
-  event.preventDefault();
   target.setPointerCapture(event.pointerId);
   dockPosition = dockPosition ?? defaultPosition(dockState);
+  if (!target.closest("[data-action='open']")) {
+    event.preventDefault();
+  }
   dragState = {
     pointerId: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
     startLeft: dockPosition.left,
     startTop: dockPosition.top,
+    hasMoved: false,
   };
   window.addEventListener("pointermove", moveDrag, true);
   window.addEventListener("pointerup", stopDrag, true);
@@ -929,6 +939,11 @@ function startDrag(event: PointerEvent): void {
 
 function moveDrag(event: PointerEvent): void {
   if (!dragState || event.pointerId !== dragState.pointerId) return;
+  dragState.hasMoved ||= hasPointerMovedBeyondThreshold(
+    { x: dragState.startX, y: dragState.startY },
+    { x: event.clientX, y: event.clientY },
+  );
+  if (dragState.hasMoved) event.preventDefault();
   dockPosition = clampPosition(
     {
       left: dragState.startLeft + event.clientX - dragState.startX,
@@ -941,6 +956,12 @@ function moveDrag(event: PointerEvent): void {
 
 function stopDrag(event: PointerEvent): void {
   if (!dragState || event.pointerId !== dragState.pointerId) return;
+  suppressNextOpenClick = dragState.hasMoved;
+  if (suppressNextOpenClick) {
+    window.setTimeout(() => {
+      suppressNextOpenClick = false;
+    }, 250);
+  }
   dragState = undefined;
   saveDockState();
   window.removeEventListener("pointermove", moveDrag, true);
@@ -1408,6 +1429,7 @@ function sanitizeContextForHistory(context: ReadingContext): ReadingContext {
 }
 
 function buildShell(): string {
+  const dockIconUrl = escapeHtml(buildExtensionIconUrl((path) => chrome.runtime.getURL(path)));
   return `
     <style>
       :host {
@@ -1470,13 +1492,25 @@ function buildShell(): string {
         height: 46px;
         border: 1px solid rgba(21, 25, 34, 0.14);
         border-radius: 50%;
-        background: var(--twyr-primary);
-        color: #ffffff;
+        background: var(--twyr-surface-strong);
+        color: var(--twyr-text);
         cursor: pointer;
         font: inherit;
         font-size: 18px;
         font-weight: 760;
         box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+        display: grid;
+        place-items: center;
+        padding: 0;
+        touch-action: none;
+      }
+
+      .orb-icon {
+        width: 30px;
+        height: 30px;
+        border-radius: 9px;
+        display: block;
+        pointer-events: none;
       }
 
       .mini {
@@ -2193,8 +2227,8 @@ function buildShell(): string {
 
         .orb {
           border-color: rgba(248, 250, 252, 0.18);
-          background: #f8fafc;
-          color: #111827;
+          background: #171a21;
+          color: #f8fafc;
         }
       }
 
@@ -2224,7 +2258,9 @@ function buildShell(): string {
     </style>
     <section class="dock" data-role="dock" data-state="collapsed" aria-label="Think Anytime Dock">
       <div class="collapsed">
-        <button class="orb" type="button" data-action="open" aria-label="打开 Think Anytime">T</button>
+        <button class="orb" type="button" data-action="open" data-role="drag-handle" title="拖动或打开 Think Anytime" aria-label="拖动或打开 Think Anytime">
+          <img class="orb-icon" src="${dockIconUrl}" alt="" aria-hidden="true" />
+        </button>
       </div>
       <div class="mini">
         <div class="drag-handle" data-role="drag-handle">
